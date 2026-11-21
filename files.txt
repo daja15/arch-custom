@@ -1,0 +1,113 @@
+# ╭──────────────────────────────────────────────────────────────╮
+# │  ЩО ВХОДИТЬ У DOTFILES — шляхи відносно домашньої теки       │
+# │  Рядок «!шаблон» — виключити (паролі, сесії, кеш, бекапи).   │
+# │  Читають обидва скрипти: save.sh (система → репо) і          │
+# │  install.sh (репо → система).                                │
+# ╰──────────────────────────────────────────────────────────────╯
+
+# Hyprland: вікна, клавіші, панелі «Музика» / «Зв'язок», знімки, автоблокування
+.config/hypr
+.config/theme
+.config/music-find
+# Панелі
+.config/waybar
+# Меню (rofi) + власний плагін uni (збирається install.sh)
+.config/rofi
+.config/systemd/user/rofi-files.service
+.config/systemd/user/rofi-files.timer
+# Стартова сторінка Firefox (http://127.0.0.1:47800)
+.config/firefox-start
+.config/systemd/user/firefox-start.socket
+.config/systemd/user/firefox-start@.service
+# Термінал і оболонка
+.config/kitty
+.config/cava/circle.conf
+.zshrc
+.p10k.zsh
+# Редактор micro: кольори, підсвічування markdown, клавіші (плагін filemanager ставить install.sh)
+.config/micro
+# Знімки, плашка гучності, сповіщення
+.config/satty
+.config/swayosd
+.config/swaync
+# Музика
+.config/kew
+.config/mpv
+# Пошта (aerc) — БЕЗ облікових записів
+.config/aerc
+# Telegram (nchat) — лише вигляд і клавіші, БЕЗ профілів і історії
+.config/nchat/app.conf
+.config/nchat/color.conf
+.config/nchat/key.conf
+.config/nchat/ui.conf
+.config/nchat/usercolor.conf
+.config/nchat/open-media.sh
+.config/nchat/comms-run.sh
+# Discord (endcord) — лише налаштування й запуск, БЕЗ входу (профіль/токен не зберігаються)
+.config/endcord/config.ini
+.config/endcord/comms-run.sh
+# Шрифти за замовчуванням (JetBrainsMono Fast збирає .local/bin/fast-font-build) + GTK
+.config/fontconfig
+.config/gtk-3.0/settings.ini
+.config/gtk-4.0/settings.ini
+.local/bin/fast-font-build
+# Шпалери: колекція (поточні — ~/.config/hypr/wallpaper.jpg)
+Pictures/Wallpapers
+# Програми за замовчуванням
+.config/mimeapps.list
+.local/share/applications/micro-kitty.desktop
+# Власні скрипти
+.local/bin/music-find
+.local/bin/music-ctl
+.local/bin/music-active
+.local/share/applications/pip-link.desktop
+.local/bin/pipctl
+.local/bin/tg-contacts
+.local/bin/comms-mail-setup
+# Архіватор arc: відкриття zip/7z/tar.*, меню Dolphin «Стиснути в архів…»
+.local/bin/arc
+.local/share/applications/arc.desktop
+.local/share/kio/servicemenus/arc.desktop
+.local/share/kio/servicemenus/arc-extract.desktop
+# Енергозбереження: eco/boost, ліміти потужності, автояскравість, ігри в boost
+# (системні частини ставить: sudo sh ~/.local/share/power-mode/install.sh)
+.local/bin/powermode-watch
+.local/bin/game-boost
+.local/bin/autobright
+.local/share/power-mode
+.local/share/power-limit
+# Dev-стек (шляхи до проєкту — у ~/.config/devstack.conf, він НЕ зберігається)
+.local/share/devstack
+# Тачпад: плавний зум щипком для програм без нативного pinch
+.local/bin/pinch-zoom
+
+# ───── Виключення
+!.config/aerc/accounts.conf
+!.config/micro/backups
+!.config/micro/buffers
+!.config/micro/plug
+!*.bak
+!*.bak-*
+!*.quote-card
+!*.outputs-try
+!.config/devstack.conf
+!__pycache__
+!*.pyc
+!.config/hypr/visualizer.off
+!.config/hypr/stars.off
+!.config/hypr/calendar.off
+!.config/hypr/deskmusic.off
+!.config/hypr/system.off
+!.config/hypr/devstack.off
+!.config/hypr/wifi.off
+!.config/hypr/notify-dnd
+!.config/hypr/games.off
+!.config/hypr/terminal.off
+!.config/theme/gen
+!compile_flags.txt
+.config/firefox-pip
+.local/bin/pip-bridge
+!.config/firefox-pip/pip.xpi
+
+# Firefox: менше пам'яті, стартова сторінка (лише user.js — сам профіль з паролями не зберігається)
+.config/mozilla/firefox/pyyeoohb.default-release/user.js

@@ -1,0 +1,45 @@
+# Драйвер геймпадів Nintendo Switch 2 (Pro Controller 2, Joy-Con 2, GameCube) для USB.
+# Взято з AUR (hid-switch2-dkms). Потрібен лише до ядра 7.4 — там драйвер уже вбудований,
+# після оновлення ядра до 7.4+ цей пакет треба видалити: sudo pacman -R hid-switch2-dkms
+pkgname=hid-switch2-dkms
+pkgver=1.1
+# ВИПРАВЛЕННЯ (локальне, 2026-11-16): у dkms.conf версія 1.0, а тека /usr/src/switch2-1.1 —
+# DKMS не знайшов би модуль; версія тепер підставляється в package()
+# ВИПРАВЛЕННЯ 2 (2026-11-16): hid-switch2.c вмикає й датчик руху (NS2_FEATURE_IMU) — для кабельного режиму
+# ВИПРАВЛЕННЯ 3: повний звіт 0x05 (параметр unified, за замовчуванням 1) — інакше гіроскопа по кабелю немає
+pkgrel=4
+pkgdesc="HID driver for Nintendo Switch 2 controllers (DKMS) 6.19"
+arch=('x86_64')
+url="https://marc.info/?l=linux-input&m=176793335900691&q=mbox"
+license=('GPL-2.0-or-later')
+depends=('dkms')
+optdepends=('linux-headers: build against the default kernel'
+            'linux-lts-headers: build against the LTS kernel'
+            'linux-cachyos-headers: build against the CachyOS kernel')
+provides=('hid-switch2')
+conflicts=('hid-switch2')
+source=('Makefile'
+        'dkms.conf'
+        'hid-ids.h'
+        'hid-switch2.c'
+        'hid-switch2.h'
+        'switch2-usb.c'
+        '99-switch2-controllers.rules')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')   # файли локальні (hid-switch2.c змінено)
+
+package() {
+  local _dest="${pkgdir}/usr/src/switch2-${pkgver}"
+  install -dm755 "${_dest}"
+  install -Dm644 "${srcdir}/Makefile"       "${_dest}/Makefile"
+  install -Dm644 "${srcdir}/dkms.conf"      "${_dest}/dkms.conf"
+  # версія в dkms.conf має збігатися з назвою теки
+  sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"${pkgver}\"/" "${_dest}/dkms.conf"
+  install -Dm644 "${srcdir}/hid-ids.h"      "${_dest}/hid-ids.h"
+  install -Dm644 "${srcdir}/hid-switch2.c"  "${_dest}/hid-switch2.c"
+  install -Dm644 "${srcdir}/hid-switch2.h"  "${_dest}/hid-switch2.h"
+  install -Dm644 "${srcdir}/switch2-usb.c"  "${_dest}/switch2-usb.c"
+
+  # Install udev rules
+  install -Dm644 "${srcdir}/99-switch2-controllers.rules" \
+    "${pkgdir}/usr/lib/udev/rules.d/99-switch2-controllers.rules"
+}

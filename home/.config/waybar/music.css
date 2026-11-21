@@ -1,0 +1,76 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  WAYBAR-MUSIC — смуга іконок панелі «Музика»                 │
+   │  Той самий стиль, що й язички висувних панелей на столі      │
+   │  (desk.c, .dr-tab): картка alpha(@bg) з рамкою @line і        │
+   │  заокругленням 16, кнопки — кружки 36 px, значки Nerd Font    │
+   │  Mono 16pt по центру. Стан: блідий — вимкнено / не запущено, │
+   │  сірий — звичайна, акцентне тло з рамкою — увімкнено / грає. │
+   │  Без transition / тіней — перемальовується лише при зміні.   │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+@import url("../theme/gen/theme.css");   /* кольори й шрифт — з ~/.config/theme/theme.conf */
+
+* {
+    font-family: "JetBrainsMono Nerd Font Mono";   /* значки — рівно в клітинку, по центру кружка */
+    font-size: 16pt;            /* моно-значки вузькі (клітинка 0,6 em) — 16pt ≈ значки язичків на столі */
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+    transition: none;
+}
+
+window#waybar        { background: transparent; color: @text; }
+window#waybar.hidden { opacity: 0; }
+
+tooltip       { background: @bg; border: 1px solid @line; border-radius: 10px; }
+tooltip label { color: @text; padding: 4px 6px; font-family: "JetBrainsMono Fast", "JetBrainsMono Nerd Font"; font-size: 10pt; }
+
+/* Острівці (керування зверху, лічильник і вихід знизу) — як картки столу */
+.modules-left,
+.modules-right {
+    background: alpha(@bg, 0.92);
+    border: 1px solid @line;
+    border-radius: 16px;
+    padding: 4px 0;
+}
+
+/* Кнопка = кружок 36 px; смуга 48 = 36 + 2×5 + рамка 2×1 */
+#custom-music-src-yt, #custom-music-src-lib,
+#custom-music-search, #custom-music-prev, #custom-music-play, #custom-music-next,
+#custom-music-repeat, #custom-music-save, #custom-music-count, #custom-music-quit {
+    color: @muted;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    margin: 2px 5px;
+    border-radius: 18px;
+}
+
+#custom-music-src-yt:hover, #custom-music-src-lib:hover,
+#custom-music-search:hover, #custom-music-prev:hover, #custom-music-play:hover, #custom-music-next:hover,
+#custom-music-repeat:hover, #custom-music-save:hover, #custom-music-count:hover {
+    background: alpha(@overlay, 0.8);
+    color: @accent;
+}
+
+/* Увімкнено / грає / головний плеєр — як відкритий язичок */
+#custom-music-play.playing,
+#custom-music-repeat.active,
+#custom-music-src-yt.active, #custom-music-src-lib.active {
+    background: @accent-bg;
+    color: @accent;
+    box-shadow: inset 0 0 0 1px @accent;
+}
+#custom-music-play.idle,                                   /* нічого не грає */
+#custom-music-src-yt.off, #custom-music-src-lib.off { color: @dim; }   /* плеєр не запущений */
+
+#custom-music-src-lib { margin-bottom: 10px; }            /* далі — керування */
+
+/* Лічильник скачаних: значок + число під ним — «пігулка» */
+#custom-music-count { color: @accent2; font-size: 12pt; padding: 6px 0; }
+
+/* Вихід — червоний лише при наведенні (небезпечна дія) */
+#custom-music-quit       { color: @muted; }
+#custom-music-quit:hover { background: @red-bg; color: @red-text; box-shadow: inset 0 0 0 1px @red; }

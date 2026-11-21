@@ -1,0 +1,6 @@
+# Про всяк випадок: секрети й кеш ніколи не комітимо
+*.pass
+accounts.conf
+api.conf
+__pycache__/
+*.pyc

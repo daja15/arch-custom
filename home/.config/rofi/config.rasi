@@ -1,0 +1,67 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  ROFI — головні налаштування                                 │
+   │  Вигляд — у theme.rasi (тема «Тиха ніч»)                     │
+   │  Попередня версія: ~/.config/backup-rice-2026-11-13/rofi/    │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+configuration {
+    /* ───────────── РЕЖИМИ ───────────── */
+    modi:                "drun,run,window";    /* запасні режими для `rofi -show …`; основне меню — scripts/launcher.sh */
+    show-icons:          false;                /* іконки вимкнено: їх розкодування (glycin у пісочниці) давало ~7-8% ядра на кожне відкриття; меню шпалер і тем вмикають мініатюри самі (-show-icons) */
+    icon-theme:          "breeze-dark";        /* тема іконок */
+    terminal:            "kitty";              /* термінал для консольних програм */
+
+    /* ───────────── ПОШУК ───────────── */
+    matching:            "normal";             /* пошук за частинами слів: fire → Firefox, звіт → звіт.pdf */
+    case-sensitive:      false;                /* не зважати на регістр */
+    sort:                false;                /* не пересортовувати: калькулятор, вікна, програми, дії, файли — саме в такому порядку */
+    sorting-method:      "fzf";                /* алгоритм сортування як у fzf */
+    disable-history:     false;                /* пам'ятати часто запущені програми — вони вгорі */
+    max-history-size:    30;                   /* скільки записів історії тримати */
+
+    /* ───────────── DRUN (програми) ───────────── */
+    drun-match-fields:   "name,generic,exec,keywords";  /* по чому шукати */
+    drun-display-format: "{name}";             /* показувати лише назву — чисто */
+    drun-show-actions:   false;                /* не показувати дії .desktop-файлів */
+    drun-use-desktop-cache: true;              /* кеш .desktop-файлів — швидший старт */
+
+    /* ───────────── ВІКНА ───────────── */
+    window-format:       "{c}  ·  {t}";        /* формат: клас · заголовок */
+    window-thumbnail:    false;                /* без мініатюр (економія GPU) */
+
+    /* ───────────── ПІДПИСИ ВКЛАДОК ───────────── */
+    display-drun:        "  Програми";
+    display-run:         "  Команда";
+    display-window:      "  Вікна";
+    display-filebrowser: "  Файли";
+
+    /* ───────────── ПОВЕДІНКА ───────────── */
+    click-to-exit:       true;                 /* клік поза меню — закрити */
+    steal-focus:         false;
+    hover-select:        false;                /* не виділяти елемент наведенням миші */
+    me-select-entry:     "MouseSecondary";     /* ПКМ — виділити */
+    me-accept-entry:     "MousePrimary";       /* ЛКМ — запустити одним кліком */
+    cycle:               true;                 /* стрілки по колу */
+
+    /* ───────────── КЛАВІШІ ───────────── */
+    kb-cancel:           "Escape,Control+g,Super+r";            /* закрити меню */
+    kb-mode-next:        "Shift+Right,Control+Tab";             /* наступна вкладка */
+    kb-mode-previous:    "Shift+Left,Control+ISO_Left_Tab";     /* попередня вкладка */
+    kb-row-down:         "Down,Control+j,Tab";                  /* вниз по списку */
+    kb-row-up:           "Up,Control+k,ISO_Left_Tab";           /* вгору по списку */
+    kb-remove-to-eol:    "";                                    /* звільняємо Ctrl+k для руху вгору */
+    kb-mode-complete:    "";                                    /* звільняємо Ctrl+l */
+    kb-element-next:     "";                                    /* Tab тепер рухає по списку */
+    kb-element-prev:     "";
+    kb-accept-entry:     "Return,KP_Enter,Control+m";           /* запустити вибране */
+    kb-accept-custom:    "Control+Return";                       /* виконати введений текст як є (посилання / вираз / команда / пошук) */
+    /* ── Текст у полі пошуку ── */
+    kb-primary-paste:    "Control+V,Shift+Insert";               /* вставити (основний буфер) */
+    kb-secondary-paste:  "Control+v,Insert";                     /* вставити (буфер обміну) */
+    kb-move-front:       "Control+Home";                         /* курсор на початок (Ctrl+A звільнено) */
+    kb-secondary-copy:   "";                                     /* вбудоване копіювання під Wayland не працює — свій нижче */
+    kb-custom-1:         "Control+a";                            /* виділити весь текст (плагін uni) */
+    kb-custom-2:         "Control+c";                            /* копіювати текст поля (плагін uni) */
+}
+
+@theme "~/.config/rofi/theme.rasi"

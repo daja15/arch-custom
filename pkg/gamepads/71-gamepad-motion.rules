@@ -1,0 +1,13 @@
+# Доступ користувачу (uaccess) до допоміжних пристроїв геймпадів:
+#  • датчики руху — гіроскоп і акселерометр (DualShock / DualSense, Joy-Con, Switch Pro, міст Switch 2);
+#  • тачпад DualShock 4 / DualSense (окремий пристрій «… Controller Touchpad»);
+#  • сирий HID (hidraw) геймпадів Switch 2 — кабельний режим моста (ngc/usbmode.py).
+#    (правило з пакета hid-switch2-dkms має номер 99 — ПІСЛЯ 73-seat-late, тож uaccess там не спрацьовує)
+# Потрібно віджету «Контролери» (desk, pads.c) і мосту Switch 2.
+# У ноутбука власного акселерометра немає, тож перше правило зачіпає лише геймпади;
+# тачпад ноутбука (SYNA…) друге правило не зачіпає — лише назви «…Controller Touchpad».
+# Встановлення: sudo install -Dm644 71-gamepad-motion.rules /etc/udev/rules.d/71-gamepad-motion.rules
+#               sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input --subsystem-match=hidraw
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_ACCELEROMETER}=="1", TAG+="uaccess"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*Controller Touchpad", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="057e", ATTRS{idProduct}=="2066|2067|2069|2073", TAG+="uaccess"

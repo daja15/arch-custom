@@ -1,0 +1,263 @@
+// ╭──────────────────────────────────────────────────────────────╮
+// │  WAYBAR — тема «Тиха ніч»                                    │
+// │  Економія ресурсів:                                          │
+// │   • великі інтервали оновлення (менше перемальовувань)       │
+// │   • годинник без секунд (оновлення раз на хвилину)           │
+// │   • жодних скриптів, що опитують систему кожну секунду       │
+// │  Документація: https://github.com/Alexays/Waybar/wiki        │
+// ╰──────────────────────────────────────────────────────────────╯
+{
+    // ───────────── ПАНЕЛЬ ─────────────
+    "layer": "top",              // шар: top = поверх звичайних вікон
+    "position": "top",           // розташування: top / bottom / left / right
+    "height": 36,                // висота (px)
+    "spacing": 0,                // відступ між модулями (керуємо в CSS)
+    "margin-top": 8,             // відступ панелі від краю екрана
+    "margin-left": 8,            // ← збігається з gaps_out у Hyprland
+    "margin-right": 8,
+    "mode": "island",            // власний режим (див. "modes" нижче)
+    "modes": {
+        // Стандартний режим "overlay" у waybar НЕ приймає кліків (passthrough) —
+        // тому робимо свій: поверх вікон, без резервування місця, але клікабельний.
+        "island": {
+            "layer": "overlay",      // шар поверх вікон (і поряд з rofi)
+            "exclusive": false,      // не резервувати місце — вікна не стискаються
+            "passthrough": false,    // ПРИЙМАТИ кліки й прокрутку
+            "visible": true
+        }
+    },
+    "exclusive": false,          // НЕ резервувати місце: вікна займають весь екран, панель — поверх них
+    "passthrough": false,        // false = панель приймає кліки
+    "fixed-center": true,        // центр завжди посередині екрана
+    "start_hidden": true,        // стартувати схованою (показ керує hypr/waybarAuto.lua)
+    "on-sigusr1": "show",        // SIGUSR1 → показати панель
+    "on-sigusr2": "hide",        // SIGUSR2 → сховати панель
+    "reload_style_on_change": true, // автоматично підхоплювати зміни style.css
+
+    // ───────────── РОЗКЛАДКА: ОСТРІВЦІ ─────────────
+    // Кожен елемент верхнього рівня = окремий «острівець» (див. style.css)
+    "modules-left":   ["group/start", "hyprland/window"],
+    "modules-center": [],                // годинник прибрано — час показує коло на робочому столі
+    "modules-right":  ["custom/recording", "custom/updates", "custom/autobright", "custom/nightlight", "custom/powermode", "custom/stars", "tray", "group/system", "custom/power"],
+
+    // Острівець «старт»: кнопка меню + робочі столи
+    "group/start": {
+        "orientation": "horizontal",
+        "modules": ["hyprland/workspaces"]   // логотип-кнопку меню прибрано (меню — SUPER)
+    },
+
+    // Острівець «система»: розкладка, звук, яскравість, мережа, профіль, батарея
+    "group/system": {
+        "orientation": "horizontal",
+        "modules": ["hyprland/language", "backlight", "battery"]   // Wi-Fi і звук прибрано (є в шторці на столі / мікшері); профіль живлення — кнопка custom/powermode (економ/буст); CPU, RAM, Dev-стек і Bluetooth — тепер віджети на столі (desk.sh toggle system|devstack|bluetooth)
+    },
+
+
+    // ───────────── ЛІВА ЧАСТИНА ─────────────
+
+    // Робочі столи
+    "hyprland/workspaces": {
+        "format": "{icon}",
+        "format-icons": {
+            "active":  "\uf111",      // поточний стіл
+            "default": "\uf192",      // стіл з вікнами
+            "empty":   "\uf10c",      // порожній стіл
+            "urgent":  "\uf06a"       // стіл, що просить уваги
+        },
+        "persistent-workspaces": { "*": 5 },  // завжди показувати 5 столів
+        "on-click": "activate",               // ЛКМ — перейти на стіл
+        "on-scroll-up": "hyprctl dispatch 'hl.dsp.focus({ workspace = \"e-1\" })'",   // коліщатко — гортати столи
+        "on-scroll-down": "hyprctl dispatch 'hl.dsp.focus({ workspace = \"e+1\" })'",
+        "show-special": false                 // не показувати scratchpad
+    },
+
+    // Заголовок активного вікна
+    "hyprland/window": {
+        "format": "{title}",
+        "max-length": 48,             // обрізати довгі заголовки
+        "separate-outputs": true,     // окремо для кожного монітора
+        "icon": true,                 // іконка програми поруч
+        "icon-size": 16,
+        "rewrite": { "": "робочий стіл" }  // що показувати, коли вікон немає
+    },
+
+
+    // ───────────── ЦЕНТР ─────────────
+
+    // ───────────── ПРАВА ЧАСТИНА ─────────────
+
+    // Системний трей
+    "tray": {
+        "icon-size": 15,
+        "spacing": 8,
+        "show-passive-items": false   // ховати «пасивні» іконки
+    },
+
+    // Розкладка клавіатури (CapsLock перемикає)
+    "hyprland/language": {
+        "format": "󰌌 {}",
+        "format-en": "EN",
+        "format-uk": "UA",
+        "on-click": "hyprctl switchxkblayout all next"   // ЛКМ — наступна розкладка
+    },
+
+    // Гучність (PipeWire)
+    "wireplumber": {
+        "format": "{icon} {volume}%",
+        "format-muted": "󰝟 вимк",
+        "format-icons": ["\uf026", "\uf027", "\uf028"],
+        "scroll-step": 5,                                                  // крок коліщатка (%)
+        "max-volume": 100,                                                 // не більше 100%
+        "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",          // ЛКМ — вимкнути / увімкнути звук
+        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle",  // ПКМ — мікрофон
+        "tooltip-format": "{node_name}"
+    },
+
+    // Яскравість екрана
+    "backlight": {
+        "device": "intel_backlight",
+        "format": "{icon} {percent}%",
+        "format-icons": ["󰃞", "󰃟", "󰃠"],
+        "on-scroll-up": "brightnessctl -e4 -n2 set 5%+",    // коліщатко — яскравість
+        "on-scroll-down": "brightnessctl -e4 -n2 set 5%-",
+        "tooltip": false
+    },
+
+    // Мережа
+    "network": {
+        "interval": 10,                               // оновлення раз на 10 с
+        "format-wifi": "󰖩 {essid}",
+        "format-ethernet": "󰈀 дріт",
+        "format-disconnected": "󰖪 офлайн",
+        "format-linked": "󰈀 без IP",
+        "max-length": 18,
+        "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ipaddr}\n\uf063 {bandwidthDownBytes}  \uf062 {bandwidthUpBytes}",
+        "tooltip-format-ethernet": "{ifname}\n{ipaddr}",
+        "on-click": "~/.config/rofi/scripts/wifi.sh"  // ЛКМ — меню Wi-Fi (мережі, пароль, вимкнути)
+    },
+
+    // Bluetooth: ЛКМ — меню (пристрої, спарювання, увімкнути / вимкнути)
+    "bluetooth": {
+        "format": "󰂯",
+        "format-off": "󰂲",
+        "format-disabled": "󰂲",
+        "format-connected": "󰂱 {num_connections}",
+        "tooltip-format": "Bluetooth: {status}",
+        "tooltip-format-connected": "Підключено:\n{device_enumerate}",
+        "tooltip-format-enumerate-connected": "{device_alias}",
+        "on-click": "~/.config/rofi/scripts/bluetooth.sh"
+    },
+
+    // Процесор
+    "cpu": {
+        "interval": 10,                               // раз на 10 с
+        "format": "\uf4bc {usage}%",
+        "states": { "warning": 70, "critical": 90 },  // підсвічування при навантаженні
+        "on-click": "kitty -e btop"                   // ЛКМ — монітор системи
+    },
+
+    // Пам'ять
+    "memory": {
+        "interval": 20,                               // раз на 20 с
+        "format": "\uefc5 {percentage}%",
+        "tooltip-format": "{used:0.1f} / {total:0.1f} ГБ\nswap: {swapUsed:0.1f} ГБ",
+        "states": { "warning": 75, "critical": 90 },
+        "on-click": "kitty -e btop"
+    },
+
+    // Профіль живлення (power-profiles-daemon)
+    "power-profiles-daemon": {
+        "format": "{icon}",
+        "tooltip-format": "Профіль: {profile}\nДрайвер: {driver}",
+        "format-icons": {
+            "default":     "\uf0e7",
+            "performance": "\uf0e7",   // продуктивність
+            "balanced":    "\uf24e",   // баланс
+            "power-saver": "\uf06c"    // енергозбереження
+        }
+        // ЛКМ — перемкнути профіль (вбудовано)
+    },
+
+    // Батарея
+    "battery": {
+        "interval": 60,                               // раз на хвилину
+        "states": { "warning": 25, "critical": 12 },  // пороги підсвічування (%)
+        "format": "{icon} {capacity}%",
+        "format-charging": "󰂄 {capacity}%",
+        "format-plugged": "󰚥 {capacity}%",
+        "format-full": "󰁹 повна",
+        "format-icons": ["󰂎", "󰁺", "󰁼", "󰁾", "󰂀", "󰁹"],
+        "tooltip-format": "{timeTo}\n{power:.1f} Вт"
+    },
+
+    // Кнопка живлення
+    // Індикатор запису екрана — видно лише під час запису (hypr/snip.py --video); клік — зупинити
+    "custom/recording": {
+        "exec": "~/.config/waybar/scripts/recording.sh",
+        "return-type": "json",
+        "interval": "once",          // без опитування: оновлює сигнал 11 від snip.py
+        "signal": 11,
+        "on-click": "~/.config/hypr/snip.py --video"
+    },
+
+    // Нічне світло: місяць — увімкнено (теплі кольори), сонце — вимкнено. Клік — перемкнути
+    "custom/nightlight": {
+        "exec": "~/.config/waybar/scripts/nightlight.sh",
+        "return-type": "json",
+        "interval": "once",          // без опитування: оновлює сигнал 13 від hypr/nightlight.sh
+        "signal": 13,
+        "on-click": "~/.config/hypr/nightlight.sh"
+    },
+
+    // Режим живлення: листок — економ (10 Вт), ракета — буст (30 Вт, GPU макс). Клік — перемкнути
+    "custom/powermode": {
+        "exec": "~/.config/waybar/scripts/powermode.sh",
+        "return-type": "json",
+        "interval": "once",          // без опитування: оновлює сигнал 17 від powermode.sh
+        "signal": 17,
+        "on-click": "~/.config/waybar/scripts/powermode.sh toggle"
+    },
+
+    // Автояскравість за камерою (~/.local/bin/autobright). Клік — ОДИН замір і яскравість (без фонового стеження)
+    "custom/autobright": {
+        "exec": "~/.local/bin/autobright status",
+        "return-type": "json",
+        "interval": "once",          // без опитування: підказку оновлює сигнал 16 після заміру
+        "signal": 16,
+        "on-click": "~/.local/bin/autobright once"
+    },
+
+    // Docker + робочий проєкт (БД, сайт :8082, адмінка :8083). ЛКМ — запустити/зупинити, ПКМ — відкрити посилання
+    "custom/devstack": {
+        "exec": "~/.config/waybar/scripts/devstack.sh",
+        "return-type": "json",
+        "interval": "once",          // без опитування: оновлює сигнал 15 від devstack.sh
+        "signal": 15,
+        "on-click": "~/.config/waybar/scripts/devstack.sh toggle",
+        "on-click-right": "~/.config/waybar/scripts/devstack.sh open"
+    },
+
+    // Зірки «-|-» на екрані: зафарбована зірка — увімкнено, контур — вимкнено. Клік — перемкнути
+    "custom/stars": {
+        "exec": "~/.config/waybar/scripts/stars.sh",
+        "return-type": "json",
+        "interval": "once",          // без опитування: оновлює сигнал 14 від hypr/desk.sh
+        "signal": 14,
+        "on-click": "~/.config/hypr/desk.sh toggle stars"
+    },
+
+    // Доступні оновлення (pacman + AUR) — видно лише коли є; клік — оновити в терміналі
+    "custom/updates": {
+        "exec": "~/.config/waybar/scripts/updates.sh",
+        "return-type": "json",
+        "interval": 3600,            // перевірка раз на годину
+        "signal": 12,                // після оновлення лічильник скидає update-run.sh
+        "on-click": "~/.config/waybar/scripts/update-run.sh"
+    },
+
+    "custom/power": {
+        "format": "⏻",
+        "tooltip": false,
+        "on-click": "pkill -x rofi || ~/.config/rofi/scripts/powermenu.sh"   // ЛКМ — меню живлення
+    }
+}

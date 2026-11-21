@@ -1,0 +1,5 @@
+# Артефакти makepkg — не зберігати
+*/src/
+*/pkg/
+*.tar.gz
+*.pkg.tar.*

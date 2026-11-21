@@ -1,0 +1,13 @@
+# Стартова сторінка Firefox за адресою http://127.0.0.1:47800
+# Не сервер, що працює постійно: systemd лише слухає порт і на кожне відкриття
+# запускає firefox-start@.service (віддати файл і завершитись). У спокої — 0 процесів.
+# Чому не file://: у Firefox Vimium не працює на локальних файлах, а на http — так.
+[Unit]
+Description=Стартова сторінка Firefox (сокет)
+
+[Socket]
+ListenStream=127.0.0.1:47800
+Accept=yes
+
+[Install]
+WantedBy=sockets.target

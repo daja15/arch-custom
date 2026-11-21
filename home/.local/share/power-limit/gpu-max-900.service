@@ -1,0 +1,10 @@
+[Unit]
+Description=Обмеження частоти Intel Iris Xe до 900 МГц (менше нагріву)
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for f in /sys/class/drm/card*/gt_boost_freq_mhz; do echo 900 > "$f"; done; for f in /sys/class/drm/card*/gt_max_freq_mhz; do echo 900 > "$f"; done'
+
+[Install]
+WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target

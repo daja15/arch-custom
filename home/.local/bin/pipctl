@@ -1,0 +1,73 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  PIPCTL — керування відео «картинка в картинці»              │
+# │  (~/.local/bin/pip, код — ~/.config/hypr/src/pip.c)          │
+# │    pipctl open <посилання> [параметри mpv] [сторінка]        │
+# │                              відкрити (уже грає — замінити)  │
+# │    pipctl clipboard          відкрити посилання з буфера     │
+# │    pipctl link <pip:…>       з кнопки у Firefox (pip: / pipvlc:)│
+# │    pipctl vlc <посилання>    відкрити у VLC (через yt-dlp)   │
+# │    pipctl toggle             показати / сховати              │
+# │    pipctl lock               замок: кліки проходять крізь    │
+# │    pipctl opacity ±0.1       прозорість                      │
+# │    pipctl pause              пауза                           │
+# │    pipctl seek ±10           перемотка, с                    │
+# │    pipctl quit               закрити                         │
+# │  Клавіші — SUPER+Alt+… (hypr/keyBinds.lua, SUPER+/).         │
+# ╰──────────────────────────────────────────────────────────────╯
+SOCK="${XDG_RUNTIME_DIR:-/tmp}/pip-mpv.sock"
+# Формат для VLC — той самий, що в плеєрі (hypr/src/pip.c): HLS, до 1080p, оригінальна доріжка звуку
+FORMAT='bv*[protocol^=m3u8][height<=?1080]+ba[protocol^=m3u8][format_note*=original]/bv*[protocol^=m3u8][height<=?1080]+ba[protocol^=m3u8]/b[protocol^=m3u8][height<=?1080]/bv*[height<=?1080]+ba/b'
+
+send() {   # send <команда mpv> [аргументи…]
+    python3 - "$SOCK" "$@" <<'PY' 2>/dev/null
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"command": sys.argv[2:]}) + "\n").encode())
+PY
+}
+running() { pgrep -x pip >/dev/null; }
+
+open_url() {   # open_url <посилання> [параметри mpv: referrer=…,user-agent=…] [сторінка — для сповіщення]
+    if running; then send loadfile "$1" replace -1 "${2:-}"; send script-message pip show
+    else setsid -f "$HOME/.local/bin/pip" "$1" "${2:-}" >/dev/null 2>&1
+    fi
+    notify-send -a "Відео" -t 2000 "Відкриваю відео поверх вікон" "${3:-$1}"
+}
+
+open_vlc() {   # YouTube та інші сайти VLC сам відкриває погано — пряме посилання дає yt-dlp
+    notify-send -a "Відео" -t 2000 "Відкриваю у VLC…" "$1"
+    # YouTube віддає 403 на прямі посилання — потоки HLS: рядок 1 — відео, рядок 2 — звук (оригінальна доріжка)
+    streams=$(yt-dlp -g -f "$FORMAT" --no-playlist "$1" 2>/dev/null)
+    video=$(printf '%s\n' "$streams" | sed -n 1p)
+    audio=$(printf '%s\n' "$streams" | sed -n 2p)
+    if [ -n "$audio" ]; then setsid -f vlc "$video" --input-slave="$audio" >/dev/null 2>&1
+    elif [ -n "$video" ]; then setsid -f vlc "$video" >/dev/null 2>&1
+    else setsid -f vlc "$1" >/dev/null 2>&1      # звичайний файл / пряме посилання
+    fi
+}
+
+decode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.argv[1]))' "$1"; }
+
+case "$1" in
+    open)      open_url "$2" "$3" "$4" ;;
+    vlc)       open_vlc "$2" ;;
+    link)      # pip:<адреса> або pipvlc:<адреса> (закодована) — з кнопки у Firefox
+        case "$2" in
+            pipvlc:*) open_vlc "$(decode "${2#pipvlc:}")" ;;
+            pip:*)    open_url "$(decode "${2#pip:}")" ;;
+        esac ;;
+    clipboard)
+        url=$(wl-paste -n 2>/dev/null)
+        case "$url" in
+            http*|/*|file:*) open_url "$url" ;;
+            *) notify-send -a "Відео" "У буфері обміну немає посилання на відео" ;;
+        esac ;;
+    toggle|lock) running && send script-message pip "$1" ;;
+    opacity)   running && send script-message pip opacity "$2" ;;
+    pause)     send cycle pause ;;
+    seek)      send seek "$2" ;;
+    quit)      send quit ;;
+    *) echo "pipctl open|clipboard|link|vlc|toggle|lock|opacity|pause|seek|quit" >&2; exit 2 ;;
+esac

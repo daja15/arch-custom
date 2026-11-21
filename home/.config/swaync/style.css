@@ -1,0 +1,196 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  SWAYNC — сповіщення, Material 3 (Android) у кольорах        │
+   │  «Тиха ніч»                                                  │
+   │  • іконки в круглих тонованих контейнерах                    │
+   │  • картки з великим заокругленням (28 px, як в Android 12+)  │
+   │  • кнопки-пігулки, перемикач у стилі Material                │
+   │  Сповіщення від однієї програми складаються в стопку         │
+   │  (notification-grouping у config.json).                      │
+   │  Без тіней і прозорості — мінімум роботи для відеочіпа.      │
+   │  Застосувати зміни: swaync-client -rs                        │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+/* Береться стандартний стиль, нижче лише змінюємо кольори й форму */
+@import url("file:///etc/xdg/swaync/style.css");
+@import url("../theme/gen/theme4.css");   /* кольори й шрифт — з ~/.config/theme/theme.conf */
+
+/* ───────────── ПАЛІТРА ─────────────
+   Ролі як у Material 3: surface (картка), container (тонований
+   кружечок під іконкою = акцент, змішаний з фоном), on-container (іконка). */
+:root {
+  --cc-bg: @bg;                           /* фон центру сповіщень */
+  --noti-border-color: @overlay;          /* ледь помітна рамка карток */
+  --noti-bg: var(--rgb-surface);          /* surface: фон картки у форматі r, g, b */
+  --noti-bg-alpha: 1;                     /* без прозорості — дешевше для GPU */
+  --noti-bg-darker: @bg;
+  --noti-bg-hover: @hover;                /* наведення */
+  --noti-bg-focus: @hover;
+  --noti-close-bg: @overlay;              /* кнопка ✕ */
+  --noti-close-bg-hover: @line;
+  --text-color: @text;                    /* on-surface */
+  --text-color-disabled: @muted;          /* on-surface-variant: час, другорядне */
+  --bg-selected: @accent;                 /* primary */
+
+  --notification-icon-size: 26px;         /* сама іконка всередині кружечка */
+  --notification-app-icon-size: 14px;     /* маленький значок програми на аватарі */
+  --notification-group-icon-size: 16px;   /* іконка в заголовку стопки */
+  --border: 1px solid var(--noti-border-color);
+  --border-radius: 16px;                  /* = картки столу (radius-card) */
+  --notification-shadow: none;            /* без тіней */
+  --font-size-body: 10pt;                 /* = body, як у віджетів столу */
+  --font-size-summary: 10pt;              /* назва — той самий розмір, жирна */
+}
+
+@define-color m3-container    @accent-bg;     /* primary-container: акцент, змішаний з фоном */
+@define-color m3-on-container @accent-soft;   /* іконка на контейнері — світліший акцент */
+@define-color m3-tonal        @overlay;       /* тональні кнопки */
+@define-color m3-tonal-hover  @line;
+
+/* ───────────── СПЛИВНІ КАРТКИ ───────────── */
+/* Відступи від краю екрана: = gaps_out у Hyprland */
+.floating-notifications .notification-row .notification-background {
+  margin: 8px 8px 0 8px;
+  padding: 0;
+}
+
+.notification-row .notification-background .notification {
+  border-radius: var(--border-radius);
+  box-shadow: none;
+}
+
+.notification-row .notification-background .notification .notification-default-action {
+  padding: 14px 16px;                     /* = відступи карток столу */
+  border-radius: var(--border-radius);
+}
+
+/* ───────────── ІКОНКИ: КРУГЛІ ТОНОВАНІ КОНТЕЙНЕРИ ───────────── */
+/* Головна іконка / аватар: кружечок 46 px, іконка 26 px по центру */
+.notification-row .notification-background .notification .notification-default-action .notification-content .image {
+  background: @m3-container;
+  color: @m3-on-container;                /* монохромні (symbolic) іконки фарбуються акцентом */
+  border-radius: 100%;
+  padding: 10px;
+  margin: 0 14px 0 0;
+  min-width: 26px;
+  min-height: 26px;
+}
+
+/* Маленький значок програми на аватарі — теж кружечок */
+.notification-row .notification-background .notification .notification-default-action .notification-content .app-icon {
+  background: @m3-container;
+  color: @m3-on-container;
+  border: 2px solid rgb(var(--noti-bg));  /* «вирізка» навколо значка, як в Android */
+  border-radius: 100%;
+  padding: 3px;
+  margin: 2px;
+  -gtk-icon-shadow: none;
+}
+
+/* ───────────── ТЕКСТ ───────────── */
+/* Назва (від кого / що) — жирна, текст — звичайний */
+.notification-content .text-box .summary {
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.notification-content .text-box .body {
+  color: @muted;                          /* = текст сповіщення у віджеті столу */
+}
+
+.notification-content .text-box .time {
+  color: @dim;                            /* = дрібний підпис (caption) */
+  font-size: 8pt;
+  margin-right: 30px;                     /* місце для кнопки ✕ */
+}
+
+/* Важливі (critical) — червоний контейнер іконки й рамка */
+.notification-row .notification-background .notification.critical {
+  border: 1px solid @red;
+}
+.notification-row .notification-background .notification.critical .notification-content .image {
+  background: @red-bg;
+  color: @red-text;
+}
+
+/* ───────────── КНОПКИ ───────────── */
+/* ✕ — круглий */
+.close-button {
+  border-radius: 100%;
+  min-width: 26px;
+  min-height: 26px;
+  margin: 10px 10px 0 0;
+}
+
+/* Дії під текстом — тональні пігулки */
+/* Дії під текстом — як кнопки віджетів (ui-btn) */
+.notification-row .notification-background .notification .notification-action > button {
+  border-radius: 8px;
+  border: 1px solid @line;
+  background: alpha(@bg, 0.6);
+  color: var(--text-color);
+  font-size: 9pt;
+  font-weight: 600;
+  padding: 4px 12px;
+  margin: 0 4px 10px 4px;
+}
+
+.notification-row .notification-background .notification .notification-action > button:hover {
+  border-color: @accent;
+  color: @accent;
+}
+
+/* ───────────── СТОПКИ (кілька сповіщень від однієї програми) ───────────── */
+/* Заголовок стопки: кругла іконка + назва програми акцентом */
+.notification-group .notification-group-headers .notification-group-icon {
+  background: @m3-container;
+  color: @m3-on-container;
+  border-radius: 100%;
+  padding: 5px;
+  margin-right: 8px;
+}
+
+.notification-group .notification-group-headers .notification-group-header {
+  color: @accent;
+  font-weight: 700;
+}
+
+.notification-group .notification-group-buttons button {
+  border-radius: 8px;
+  border: 1px solid @line;
+  background: alpha(@bg, 0.6);
+}
+
+.notification-group .notification-group-buttons button:hover {
+  border-color: @accent;
+  color: @accent;
+}
+
+/* ───────────── ЦЕНТР СПОВІЩЕНЬ (SUPER+N) ───────────── */
+.control-center {
+  background: var(--cc-bg);
+  border: var(--border);
+  border-radius: var(--border-radius);
+  box-shadow: none;
+}
+
+.widget-title > label {                  /* = заголовок картки (t-title) */
+  font-size: 12pt;
+  font-weight: 700;
+  color: @accent2;
+}
+
+.widget-title > button {                 /* = кнопка (ui-btn) */
+  border-radius: 8px;
+  border: 1px solid @line;
+  background: alpha(@surface, 0.8);
+  font-size: 9pt;
+  font-weight: 600;
+  padding: 4px 12px;
+}
+
+.widget-title > button:hover {
+  border-color: @accent;
+  color: @accent;
+}
+
+/* Перемикач «Не турбувати» — спільний перемикач UI-кіту (gen/theme.css: switch) */

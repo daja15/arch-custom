@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+# ╭──────────────────────────────────────────────────────────────╮
+# │  TG-CONTACTS — контакти Telegram на всіх твоїх акаунтах      │
+# │  Працює напряму з Telegram (TDLib, /usr/lib/libtdjson.so),   │
+# │  не залежить від nchat: зміни видно всюди — на телефоні,     │
+# │  у Telegram Desktop, у nchat.                                │
+# │                                                              │
+# │  Уміє: показати / знайти, перейменувати, видалити, додати    │
+# │  контакт — на всіх акаунтах одразу або на вибраних.          │
+# │                                                              │
+# │  Файли:                                                      │
+# │    ~/.config/tg-contacts/api.conf   — api_id / api_hash      │
+# │    ~/.config/tg-contacts/accounts   — номери акаунтів        │
+# │    ~/.local/share/tg-contacts/      — сесії (вхід один раз)  │
+# ╰──────────────────────────────────────────────────────────────╯
+import ctypes
+import getpass
+import itertools
+import json
+import os
+import sys
+import time
+
+CONF_DIR = os.path.expanduser("~/.config/tg-contacts")
+API_FILE = os.path.join(CONF_DIR, "api.conf")
+ACC_FILE = os.path.join(CONF_DIR, "accounts")
+DATA_DIR = os.path.expanduser("~/.local/share/tg-contacts")
+NCHAT_PROFILES = os.path.expanduser("~/.config/nchat/profiles")
+
+# Кольори «Тиха ніч» (truecolor)
+def rgb(h): return f"\033[38;2;{int(h[0:2],16)};{int(h[2:4],16)};{int(h[4:6],16)}m"
+ACC, ACC2, MUT, GRN, YEL, RED, B, R = rgb("88c0d0"), rgb("b5a1e0"), rgb("7d8494"), rgb("a3be8c"), rgb("e5c07b"), rgb("e06c75"), "\033[1m", "\033[0m"
+
+
+# ───────────── TDLIB ─────────────
+td = ctypes.CDLL("libtdjson.so")
+td.td_create_client_id.restype = ctypes.c_int
+td.td_send.argtypes = [ctypes.c_int, ctypes.c_char_p]
+td.td_receive.argtypes = [ctypes.c_double]
+td.td_receive.restype = ctypes.c_char_p
+td.td_execute.argtypes = [ctypes.c_char_p]
+td.td_execute.restype = ctypes.c_char_p
+td.td_execute(json.dumps({"@type": "setLogVerbosityLevel", "new_verbosity_level": 0}).encode())  # без службового шуму
+
+_extra = itertools.count(1)
+_results = {}   # @extra → відповідь
+_auth = {}      # client_id → останній стан авторизації
+
+
+class TgError(Exception):
+    pass
+
+
+def pump(timeout=1.0):
+    """Отримати одну подію від TDLib і розкласти її"""
+    raw = td.td_receive(timeout)
+    if not raw:
+        return
+    o = json.loads(raw)
+    if "@extra" in o:
+        _results[o["@extra"]] = o
+    elif o.get("@type") == "updateAuthorizationState":
+        _auth[o.get("@client_id")] = o["authorization_state"]
+
+
+def call(cid, req, timeout=60):
+    """Надіслати запит і дочекатися відповіді саме на нього"""
+    e = next(_extra)
+    td.td_send(cid, json.dumps(dict(req, **{"@extra": e})).encode())
+    end = time.time() + timeout
+    while e not in _results:
+        if time.time() > end:
+            raise TgError("Telegram не відповідає (таймаут)")
+        pump()
+    o = _results.pop(e)
+    if o.get("@type") == "error":
+        raise TgError(o.get("message", "невідома помилка"))
+    return o
+
+
+# ───────────── НАЛАШТУВАННЯ ─────────────
+def ask(prompt, default=""):
+    try:
+        v = input(prompt).strip()
+    except EOFError:
+        raise KeyboardInterrupt
+    return v or default
+
+
+def load_api():
+    """api_id / api_hash: ключі програми для доступу до Telegram (видаються безкоштовно)"""
+    if os.path.exists(API_FILE):
+        conf = dict(l.strip().split("=", 1) for l in open(API_FILE) if "=" in l)
+        return int(conf["api_id"]), conf["api_hash"]
+    print(f"""{B}Перше налаштування{R}
+Скрипту потрібні власні ключі доступу до Telegram (один раз):
+  1. Відкрий {ACC}https://my.telegram.org{R} і увійди своїм номером.
+  2. «API development tools» → заповни App title (будь-що, напр. tg-contacts),
+     Short name (напр. tgcontacts), Platform — Desktop → Create application.
+  3. Скопіюй сюди {B}App api_id{R} і {B}App api_hash{R}.
+""")
+    api_id = ask("api_id: ")
+    api_hash = ask("api_hash: ")
+    if not api_id.isdigit() or len(api_hash) < 20:
+        sys.exit(f"{RED}Неправильні ключі.{R}")
+    os.makedirs(CONF_DIR, exist_ok=True)
+    with open(API_FILE, "w") as f:
+        f.write(f"api_id={api_id}\napi_hash={api_hash}\n")
+    os.chmod(API_FILE, 0o600)   # ключі — лише для тебе
+    return int(api_id), api_hash
+
+
+def nchat_phones():
+    try:
+        return sorted(n.split("_", 1)[1] for n in os.listdir(NCHAT_PROFILES)
+                      if n.startswith("Telegram_") and "_" in n)
+    except OSError:
+        return []
+
+
+def load_accounts():
+    """Список номерів. Перший раз — береться з профілів nchat."""
+    if os.path.exists(ACC_FILE):
+        return [l.strip() for l in open(ACC_FILE) if l.strip()]
+    phones = nchat_phones()
+    if not phones:
+        phones = [ask("Номер акаунта (+380…): ")]
+    save_accounts(phones)
+    return phones
+
+
+def save_accounts(phones):
+    os.makedirs(CONF_DIR, exist_ok=True)
+    with open(ACC_FILE, "w") as f:
+        f.write("\n".join(phones) + "\n")
+
+
+def nchat_name(phone):
+    """Назва акаунта з nchat (profile_display_name), якщо задана"""
+    try:
+        for line in open(os.path.join(NCHAT_PROFILES, f"Telegram_{phone}", "telegram.conf")):
+            if line.startswith("profile_display_name="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def pretty(phone):
+    p = phone if phone.startswith("+") else "+" + phone
+    if p.startswith("+380") and len(p) == 13:
+        return f"{p[:4]} {p[4:6]} {p[6:9]} {p[9:11]} {p[11:]}"
+    return p
+
+
+# ───────────── АКАУНТ ─────────────
+class Account:
+    def __init__(self, phone, api):
+        self.phone = phone
+        self.api = api
+        self.label = nchat_name(phone) or "…" + phone[-4:]
+        self.cid = td.td_create_client_id()
+        self.contacts = {}   # user_id → user
+
+    def login(self):
+        cid = self.cid
+        call(cid, {"@type": "getOption", "name": "version"})   # запустити клієнта
+        base = os.path.join(DATA_DIR, self.phone.lstrip("+"))
+        while True:
+            end = time.time() + 30
+            while cid not in _auth:
+                if time.time() > end:
+                    raise TgError("немає відповіді від Telegram")
+                pump()
+            st = _auth.pop(cid)
+            t = st["@type"]
+            try:
+                if t == "authorizationStateWaitTdlibParameters":
+                    call(cid, {
+                        "@type": "setTdlibParameters",
+                        "use_test_dc": False,
+                        "database_directory": base,
+                        "files_directory": os.path.join(base, "files"),
+                        "database_encryption_key": "",
+                        "use_file_database": False,
+                        "use_chat_info_database": True,
+                        "use_message_database": False,
+                        "use_secret_chats": False,
+                        "api_id": self.api[0],
+                        "api_hash": self.api[1],
+                        "system_language_code": "uk",
+                        "device_model": "Linux",
+                        "system_version": "",
+                        "application_version": "tg-contacts 1.0",
+                    })
+                elif t == "authorizationStateWaitPhoneNumber":
+                    print(f"\n{B}Вхід в акаунт {pretty(self.phone)}{R} (лише перший раз)")
+                    call(cid, {"@type": "setAuthenticationPhoneNumber", "phone_number": self.phone})
+                elif t == "authorizationStateWaitCode":
+                    code = ask(f"Код для {pretty(self.phone)} (прийде в Telegram): ")
+                    call(cid, {"@type": "checkAuthenticationCode", "code": code})
+                elif t == "authorizationStateWaitPassword":
+                    hint = st.get("password_hint")
+                    pw = getpass.getpass(f"Хмарний пароль{f' (підказка: {hint})' if hint else ''}: ")
+                    call(cid, {"@type": "checkAuthenticationPassword", "password": pw})
+                elif t == "authorizationStateReady":
+                    return
+                elif t in ("authorizationStateClosed", "authorizationStateClosing", "authorizationStateLoggingOut"):
+                    raise TgError("сесію закрито")
+                else:
+                    raise TgError(f"непідтримуваний крок входу: {t}")
+            except TgError as e:
+                if t in ("authorizationStateWaitCode", "authorizationStateWaitPassword"):
+                    print(f"{RED}{e}{R} — спробуй ще раз")
+                    _auth[cid] = st   # лишаємося на цьому кроці
+                else:
+                    raise
+
+    def load(self):
+        ids = call(self.cid, {"@type": "getContacts"}).get("user_ids", [])
+        self.contacts = {i: call(self.cid, {"@type": "getUser", "user_id": i}) for i in ids}
+
+    def close(self):
+        td.td_send(self.cid, json.dumps({"@type": "close"}).encode())
+
+
+# ───────────── КОНТАКТИ ─────────────
+def full_name(u):
+    return (u.get("first_name", "") + " " + u.get("last_name", "")).strip() or "(без імені)"
+
+
+def username(u):
+    names = (u.get("usernames") or {}).get("active_usernames") or []
+    return "@" + names[0] if names else ""
+
+
+def merged(accounts):
+    """Усі контакти з усіх акаунтів: user_id → {акаунт: user}. user_id у Telegram спільний для всіх акаунтів."""
+    out = {}
+    for a in accounts:
+        for uid, u in a.contacts.items():
+            out.setdefault(uid, {})[a] = u
+    return out
+
+
+def row(uid, per_acc, accounts):
+    any_u = next(iter(per_acc.values()))
+    names = {full_name(u) for u in per_acc.values()}
+    name = " / ".join(sorted(names))                       # у різних акаунтах контакт може називатися по-різному
+    phone = pretty(any_u["phone_number"]) if any_u.get("phone_number") else MUT + "номер прихований" + R
+    tags = " ".join((ACC + a.label + R) if a in per_acc else (MUT + "·" * len(a.label) + R) for a in accounts)
+    return f"{B}{name}{R}  {phone}  {MUT}{username(any_u)}{R}   [{tags}]"
+
+
+def search(accounts, query):
+    q = query.lower().replace(" ", "")
+    res = []
+    for uid, per_acc in merged(accounts).items():
+        u = next(iter(per_acc.values()))
+        hay = " ".join(full_name(x) for x in per_acc.values()) + " " + u.get("phone_number", "") + " " + username(u)
+        if q in hay.lower().replace(" ", ""):
+            res.append((uid, per_acc))
+    res.sort(key=lambda r: full_name(next(iter(r[1].values()))).lower())
+    return res
+
+
+def pick(accounts, title):
+    """Знайти й вибрати один контакт"""
+    q = ask(f"{title} — частина імені, номера або @ніка (Enter = усі): ")
+    res = search(accounts, q)
+    if not res:
+        print(f"{YEL}Нічого не знайдено.{R}")
+        return None
+    for i, (uid, per_acc) in enumerate(res, 1):
+        print(f"{MUT}{i:>3}.{R} {row(uid, per_acc, accounts)}")
+    n = ask("Номер у списку (Enter = скасувати): ")
+    if not n.isdigit() or not 1 <= int(n) <= len(res):
+        print(f"{YEL}Нічого не вибрано — скасовано.{R}")
+        return None
+    return res[int(n) - 1]
+
+
+def parse_numbers(text, n):
+    """«1,3,5-8» або «все» → індекси 0…n-1 (без повторів, по порядку)"""
+    t = text.lower().replace(" ", "")
+    if t in ("все", "всі", "усі", "all", "*"):
+        return list(range(n))
+    out = []
+    for part in t.split(","):
+        if "-" in part:
+            a, _, b = part.partition("-")
+            if a.isdigit() and b.isdigit():
+                out += range(int(a), int(b) + 1)
+        elif part.isdigit():
+            out.append(int(part))
+    return [i - 1 for i in dict.fromkeys(out) if 1 <= i <= n]
+
+
+def pick_many(accounts, title):
+    """Знайти й вибрати кілька контактів: 1,3,5-8 або «все»"""
+    q = ask(f"{title} — частина імені, номера або @ніка (Enter = усі): ")
+    res = search(accounts, q)
+    if not res:
+        print(f"{YEL}Нічого не знайдено.{R}")
+        return []
+    for i, (uid, per_acc) in enumerate(res, 1):
+        print(f"{MUT}{i:>3}.{R} {row(uid, per_acc, accounts)}")
+    s = ask(f"Номери у списку: {B}3{R} / {B}1,4,7{R} / {B}2-9{R} / {B}все{R} — знайдені (Enter = скасувати): ")
+    chosen = [res[i] for i in parse_numbers(s, len(res))]
+    if not chosen:
+        print(f"{YEL}Нічого не вибрано — скасовано.{R}")
+    return chosen
+
+
+def choose_accounts(accounts, default, verb):
+    """Вибір акаунтів для дії. Enter — типовий набір."""
+    print("Акаунти: " + "  ".join(f"{MUT}{i}.{R} {a.label} {MUT}{pretty(a.phone)}{R}" for i, a in enumerate(accounts, 1)))
+    d = ", ".join(a.label for a in default)
+    s = ask(f"{verb} в яких акаунтах? Номери через кому (Enter = {d}): ")
+    if not s:
+        return default
+    chosen = []
+    for part in s.replace(" ", "").split(","):
+        if part.isdigit() and 1 <= int(part) <= len(accounts):
+            chosen.append(accounts[int(part) - 1])
+    return chosen
+
+
+def report(acc, ok, msg=""):
+    print(f"  {GRN}✓{R} {acc.label}" if ok else f"  {RED}✗{R} {acc.label}: {msg}")
+
+
+def do_list(accounts):
+    q = ask("Пошук — частина імені, номера або @ніка (Enter = усі): ")
+    res = search(accounts, q)
+    for uid, per_acc in res:
+        print("  " + row(uid, per_acc, accounts))
+    print(f"{MUT}Знайдено: {len(res)}{R}")
+
+
+def do_rename(accounts):
+    r = pick(accounts, "Перейменувати")
+    if not r:
+        return
+    uid, per_acc = r
+    cur = next(iter(per_acc.values()))
+    print(f"Зараз: {B}{full_name(cur)}{R}")
+    first = ask(f"Нове ім'я (Enter = «{cur.get('first_name', '')}»): ", cur.get("first_name", ""))
+    last = ask(f"Нове прізвище (Enter = «{cur.get('last_name', '')}», «-» = прибрати): ", cur.get("last_name", ""))
+    if last == "-":
+        last = ""
+    for a in choose_accounts(accounts, list(per_acc), "Перейменувати"):
+        u = a.contacts.get(uid) or cur
+        try:
+            call(a.cid, {"@type": "addContact", "user_id": uid, "share_phone_number": False,
+                         "contact": {"@type": "importedContact", "phone_number": u.get("phone_number", ""),
+                                     "first_name": first, "last_name": last}})
+            report(a, True)
+        except TgError as e:
+            report(a, False, str(e))
+
+
+def do_delete(accounts):
+    picked = pick_many(accounts, "Видалити")
+    if not picked:
+        return
+    in_any = [a for a in accounts if any(a in per_acc for _, per_acc in picked)]   # акаунти, де є хоч один із вибраних
+    targets = choose_accounts(accounts, in_any, "Видалити")
+    if not targets:
+        return
+    print(f"\n{RED}{B}Буде видалено ({len(picked)}):{R}")
+    for uid, per_acc in picked:
+        print("  " + row(uid, per_acc, accounts))
+    names = ", ".join(a.label for a in targets)
+    if ask(f"{RED}Видалити ці контакти з акаунтів ({names})?{R} так/ні: ").lower() not in ("так", "т", "y", "yes"):
+        print("Скасовано.")
+        return
+    for a in targets:
+        ids = [uid for uid, _ in picked if uid in a.contacts]
+        if not ids:
+            report(a, False, "жодного з вибраних контактів там немає")
+            continue
+        try:
+            call(a.cid, {"@type": "removeContacts", "user_ids": ids})   # усі одним запитом
+            print(f"  {GRN}✓{R} {a.label}: видалено {len(ids)}")
+        except TgError as e:
+            report(a, False, str(e))
+
+
+def do_add(accounts):
+    phone = ask("Номер нового контакту (+380…): ").replace(" ", "")
+    if not phone:
+        return
+    first = ask("Ім'я: ")
+    last = ask("Прізвище (Enter = без): ")
+    if not first:
+        print(f"{YEL}Ім'я обов'язкове.{R}")
+        return
+    for a in choose_accounts(accounts, accounts, "Додати"):
+        try:
+            res = call(a.cid, {"@type": "importContacts", "contacts": [
+                {"@type": "importedContact", "phone_number": phone, "first_name": first, "last_name": last}]})
+            if any(res.get("user_ids", [])):
+                report(a, True)
+            else:
+                report(a, False, "цей номер не зареєстрований у Telegram (або приховує себе від пошуку за номером)")
+        except TgError as e:
+            report(a, False, str(e))
+
+
+def do_add_account(accounts, api):
+    phone = ask("Номер акаунта (+380…): ").replace(" ", "")
+    if not phone or any(a.phone == phone for a in accounts):
+        return
+    a = Account(phone, api)
+    a.login()
+    a.load()
+    accounts.append(a)
+    save_accounts([x.phone for x in accounts])
+    print(f"{GRN}Акаунт додано.{R}")
+
+
+# ───────────── ГОЛОВНЕ МЕНЮ ─────────────
+def main():
+    try:
+        api = load_api()
+        accounts = [Account(p, api) for p in load_accounts()]
+    except KeyboardInterrupt:
+        print()
+        return
+    try:
+        for a in accounts:
+            a.login()
+        while True:
+            print(f"\n{ACC}{B}Завантаження контактів…{R}", end="\r")
+            for a in accounts:
+                a.load()
+            total = len(merged(accounts))
+            print(f"\n{B}КОНТАКТИ TELEGRAM{R}  {MUT}{total} контактів · акаунти: "
+                  + ", ".join(f"{a.label} ({len(a.contacts)})" for a in accounts) + R)
+            print(f"  {ACC}1{R} Показати / знайти\n  {ACC}2{R} Перейменувати\n  {ACC}3{R} Видалити (можна кілька)\n"
+                  f"  {ACC}4{R} Додати контакт\n  {ACC2}5{R} Додати ще акаунт\n  {MUT}0{R} Вихід")
+            c = ask("> ")
+            if c == "1":
+                do_list(accounts)
+            elif c == "2":
+                do_rename(accounts)
+            elif c == "3":
+                do_delete(accounts)
+            elif c == "4":
+                do_add(accounts)
+            elif c == "5":
+                do_add_account(accounts, api)
+            elif c in ("0", "q", "й"):
+                break
+    except KeyboardInterrupt:
+        print()
+    except TgError as e:
+        print(f"{RED}Помилка: {e}{R}")
+    finally:
+        for a in accounts:
+            a.close()
+        end = time.time() + 2
+        while time.time() < end:
+            pump(0.2)
+
+
+if __name__ == "__main__":
+    main()

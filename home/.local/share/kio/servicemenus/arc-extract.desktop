@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Service
+MimeType=application/zip;application/x-7z-compressed;application/gzip;application/x-gzip;application/x-compressed-tar;application/x-xz-compressed-tar;application/x-zstd-compressed-tar;application/x-bzip2-compressed-tar;application/x-tar;application/vnd.rar;application/x-rar;
+Actions=here;to;
+X-KDE-Priority=TopLevel
+
+[Desktop Action here]
+Name=Розпакувати сюди
+Icon=archive-extract
+Exec=/home/jijau/.local/bin/arc open %F
+
+[Desktop Action to]
+Name=Розпакувати в…
+Icon=archive-extract
+Exec=/home/jijau/.local/bin/arc extract-to %F

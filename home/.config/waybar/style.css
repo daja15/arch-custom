@@ -1,0 +1,172 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  WAYBAR — стиль «Тиха ніч», острівці                         │
+   │  Фон панелі прозорий, кожна група модулів — окремий          │
+   │  «острівець». Без box-shadow і без анімацій: панель          │
+   │  перемальовується тільки коли змінюються дані.               │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+@import url("../theme/gen/theme.css");   /* кольори, шрифти, UI-кіт — з ~/.config/theme/theme.conf */
+/* Розміри — ті самі, що у віджетів столу: текст 10pt (body), напівжирний 600 (medium),
+   кнопки й наведення — заокруглення 8 px (radius-control), острівці — 10 px (radius) */
+
+/* ───────────── БАЗА ───────────── */
+* {
+    font-size: 10pt;                                     /* розмір тексту = body */
+    font-weight: 600;                                    /* = medium */
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;       /* тіні вимкнено — економія */
+    text-shadow: none;
+    transition: none;       /* жодних анімацій GTK      */
+}
+
+/* Сама панель — повністю прозора, видно лише острівці */
+window#waybar {
+    background: transparent;
+    color: @text;
+}
+
+window#waybar.hidden { opacity: 0; }   /* схована панель — повністю невидима */
+
+/* ───────────── ПОЯВА ─────────────
+   Без анімації: панель з'являється й зникає миттєво (SUPER затиснуто — видно). */
+window#waybar.mode-invisible > box { opacity: 0; }
+window#waybar.mode-island > box { opacity: 1; }
+
+tooltip {                               /* спливні підказки — як картка столу */
+    background: @bg;
+    border: 1px solid @line;
+    border-radius: 10px;
+}
+tooltip label { color: @text; padding: 4px 6px; font-weight: 400; }
+
+
+/* ───────────── ОСТРІВЦІ ───────────── */
+/* Кожен елемент верхнього рівня — окремий острівець */
+#start,
+#window,
+#tray,
+#system,
+#custom-power {
+    background: @surface;               /* суцільний фон острівця */
+    border: 1px solid @line;            /* тонка рамка */
+    border-radius: 10px;                /* = rounding вікон у Hyprland */
+    margin: 0 4px;                      /* проміжок між острівцями (сітка 4 px) */
+    padding: 0 8px;
+}
+
+/* Крайні острівці без зовнішнього відступу — рівно по gaps_out */
+.modules-left  > widget:first-child > * { margin-left: 0; }
+.modules-right > widget:last-child  > * { margin-right: 0; }
+
+/* Порожній острівець заголовка не показуємо */
+window#waybar.empty #window { background: transparent; border-color: transparent; }
+
+
+/* ───────────── МОДУЛІ ВСЕРЕДИНІ ОСТРІВЦІВ ───────────── */
+#language, #wireplumber, #backlight, #network, #bluetooth,
+#cpu, #memory, #power-profiles-daemon, #battery {
+    padding: 0 8px;
+    margin: 5px 0;
+    border-radius: 8px;                 /* = radius-control */
+}
+
+/* Наведення на клікабельні модулі */
+#custom-power:hover,
+#wireplumber:hover, #network:hover, #bluetooth:hover, #cpu:hover, #memory:hover,
+#language:hover, #power-profiles-daemon:hover {
+    background: @overlay;
+}
+
+
+/* ───────────── «СТАРТ»: робочі столи ───────────── */
+#workspaces button {
+    padding: 0 5px;
+    margin: 5px 0;
+    color: @muted;                      /* стіл з вікнами */
+    background: transparent;
+    border-radius: 8px;
+}
+#workspaces button.empty  { color: @line; }       /* порожній стіл    */
+#workspaces button.active { color: @accent; }     /* поточний стіл    */
+#workspaces button.urgent { color: @red; }        /* просить уваги    */
+#workspaces button:hover  { background: @overlay; color: @text; }
+
+
+/* ───────────── ЗАГОЛОВОК ВІКНА ───────────── */
+#window {
+    color: @muted;
+    font-weight: 400;
+    padding: 0 12px;
+}
+
+
+
+/* ───────────── ТРЕЙ ───────────── */
+#tray { padding: 0 10px; }
+#tray > .needs-attention { background: @red; border-radius: 8px; }
+
+
+/* ───────────── «СИСТЕМА» ───────────── */
+#language    { color: @accent2; }
+#wireplumber { color: @accent; }
+#wireplumber.muted { color: @muted; }             /* звук вимкнено */
+#backlight   { color: @yellow; }
+#network     { color: @accent; }
+#bluetooth   { color: @accent2; }
+#bluetooth.off, #bluetooth.disabled { color: @muted; }
+#network.disconnected { color: @red; }            /* немає мережі */
+#cpu, #memory { color: @text; }
+
+#cpu.warning,  #memory.warning  { color: @yellow; }   /* навантаження */
+#cpu.critical, #memory.critical { color: @red; }
+
+#power-profiles-daemon.performance { color: @red; }
+#power-profiles-daemon.balanced    { color: @accent; }
+#power-profiles-daemon.power-saver { color: @green; }
+
+#battery              { color: @green; }
+#battery.charging,
+#battery.plugged      { color: @accent; }
+#battery.warning:not(.charging)  { color: @yellow; }
+#battery.critical:not(.charging) { color: @bg; background: @red; }  /* статичний червоний, без блимання */
+
+
+/* ───────────── КНОПКА ЖИВЛЕННЯ ───────────── */
+#custom-power {
+    color: @red;
+    font-size: 12pt;                    /* = icon */
+    padding: 0 14px 0 12px;
+}
+
+
+/* ───────────── ЗАПИС ЕКРАНА / ОНОВЛЕННЯ ───────────── */
+/* Окремі острівці; коли порожні (немає запису / оновлень) — waybar їх ховає */
+#custom-recording,
+#custom-updates,
+#custom-nightlight,
+#custom-autobright,
+#custom-powermode,
+#custom-stars {
+    border: 1px solid @line;
+    border-radius: 10px;
+    padding: 0 12px;
+    margin-left: 6px;
+}
+#custom-recording { background: @red;     color: @bg; }   /* червоний — йде запис */
+#custom-updates   { background: @surface; color: @yellow; }
+#custom-updates:hover { background: @overlay; }
+#custom-updates.uptodate { color: @muted; }             /* оновлень немає — приглушено */
+#custom-nightlight    { background: @surface; color: @muted; min-width: 20px; }   /* вимкнено — приглушене сонце */
+#custom-nightlight.on { background: @accent-bg; color: @accent; border-color: @accent; }   /* увімкнено — як увімкнена кнопка */
+#custom-nightlight:hover { background: @overlay; }
+#custom-stars    { background: @surface; color: @muted; min-width: 20px; }   /* вимкнено — приглушений контур */
+#custom-stars.on { background: @accent-bg; color: @accent; border-color: @accent; }       /* увімкнено — як увімкнена кнопка */
+#custom-stars:hover { background: @overlay; }
+#custom-powermode       { background: @surface; color: @muted; min-width: 20px; }   /* економ — приглушений листок */
+#custom-powermode.boost { background: @accent-bg; color: @yellow; border-color: @yellow; }   /* буст — жовта ракета, помітно */
+#custom-powermode.odd   { color: @yellow; }   /* ліміт збила прошивка — листок з «!» */
+#custom-powermode:hover { background: @overlay; }
+#custom-autobright    { background: @surface; color: @muted; min-width: 20px; }   /* клік — один замір камерою */
+#custom-autobright:hover { background: @overlay; color: @accent; }

@@ -1,0 +1,13 @@
+[Unit]
+Description=Сон пристроїв у простої: ASPM L1-підстани, runtime PM для PCI (NVMe, Ethernet, Wi-Fi, кардрідер) і камери
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+# Без цього пакет процесора не засинає глибоко (C8–C10) і ноутбук бере зайві ват у простої.
+# Мишу (Logi Bolt) не чіпаємо — з автосном вона може «прокидатися» з затримкою.
+# Відкат: sudo systemctl disable --now runtime-pm.service і перезавантаження.
+ExecStart=/bin/sh -c 'echo powersupersave > /sys/module/pcie_aspm/parameters/policy; for d in /sys/bus/pci/devices/*/power/control; do echo auto > "$d"; done; for u in /sys/bus/usb/devices/*; do [ "$(cat $u/idVendor 2>/dev/null):$(cat $u/idProduct 2>/dev/null)" = 30c9:0030 ] && echo auto > $u/power/control; done; true'
+
+[Install]
+WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target

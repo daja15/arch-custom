@@ -1,0 +1,35 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  SWAYOSD — плашка гучності / яскравості, «Тиха ніч»          │
+   │  З'являється при натисканні клавіш звуку й яскравості.       │
+   ╰──────────────────────────────────────────────────────────────╯ */
+@import url("../theme/gen/theme4.css");   /* кольори й шрифт — з ~/.config/theme/theme.conf */
+
+window#osd {
+    padding: 10px 18px;
+    border-radius: 16px;                /* = картки столу */
+    border: 1px solid @line;
+    background: @surface;
+}
+window#osd #container { margin: 10px; }
+window#osd image,
+window#osd label     { color: @text; }
+window#osd progressbar:disabled,
+window#osd image:disabled { opacity: 0.5; }        /* вимкнений звук — приглушено */
+window#osd progressbar {
+    min-height: 6px;
+    border-radius: 999px;
+    background: transparent;
+    border: none;
+}
+window#osd trough {
+    min-height: inherit;
+    border-radius: inherit;
+    border: none;
+    background: @line;
+}
+window#osd progress {
+    min-height: inherit;
+    border-radius: inherit;
+    border: none;
+    background: @accent;                            /* заповнення — акцент */
+}

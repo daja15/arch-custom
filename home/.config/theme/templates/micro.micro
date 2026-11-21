@@ -1,0 +1,77 @@
+# ╭──────────────────────────────────────────────────────────────╮
+# │  MICRO — кольорова схема «Тиха ніч»                          │
+# │  ШАБЛОН: {назва} — колір з ~/.config/theme/theme.conf;        │
+# │  apply генерує gen/micro.micro (micro бере його звідти).     │
+# │  Справжні кольори (truecolor); фон — прозорий фон kitty.     │
+# │  Формат: color-link група "текст,фон"                        │
+# ╰──────────────────────────────────────────────────────────────╯
+
+# Основний текст (без фону — видно прозорість kitty)
+color-link default "{text}"
+
+# ───── Синтаксис
+color-link comment            "italic {dim}"     # коментарі — приглушені, курсивом
+color-link identifier         "{blue}"            # назви функцій / змінних
+color-link identifier.class   "{accent}"
+color-link identifier.var     "{text}"
+color-link constant           "{yellow}"            # константи, true / false
+color-link constant.number    "{yellow}"            # числа
+color-link constant.string    "{green}"            # рядки
+color-link constant.string.char "{green}"
+color-link constant.specialChar "{accent}"          # \n, \t …
+color-link statement          "bold {accent2}"       # ключові слова: if, for, return …
+color-link symbol             "{accent}"            # оператори
+color-link symbol.brackets    "{text}"
+color-link symbol.tag         "{blue}"            # теги HTML
+color-link preproc            "{red}"            # #include, import …
+color-link type               "{accent}"            # типи
+color-link type.keyword       "bold {accent2}"
+color-link special            "{accent2}"
+color-link underlined         "underline {accent}"  # посилання
+color-link error              "bold {red}"
+color-link todo               "bold {bg},{yellow}"   # TODO / FIXME — жовта плашка
+
+# ───── Інтерфейс
+color-link line-number          "{faint}"
+color-link current-line-number  "bold {accent}"
+color-link cursor-line          "{surface}"          # підсвічування рядка з курсором (тло)
+color-link color-column         "{surface}"
+color-link selection            "{bg},{accent}"
+color-link hlsearch             "{bg},{yellow}"  # знайдене
+color-link match-brace          "bold {bg},{accent2}"
+color-link indent-char          "{line}"          # символи відступів
+color-link statusline           "{text},{overlay}"  # рядок стану внизу
+color-link statusline.inactive  "{muted},{surface}"
+color-link tabbar               "{muted},{surface}"
+color-link tabbar.active        "bold {bg},{accent}"
+color-link message              "{text}"
+color-link error-message        "bold {red}"
+color-link scrollbar            "{line}"
+color-link divider              "{line}"
+color-link gutter-error         "{red}"
+color-link gutter-warning       "{yellow}"
+color-link diff-added           "{green}"
+color-link diff-modified        "{yellow}"
+color-link diff-deleted         "{red}"
+
+# ───── Markdown (див. syntax/markdown.yaml)
+color-link special.h1        "bold {accent}"           # # Заголовок
+color-link special.h2        "bold {accent2}"           # ## Підзаголовок
+color-link special.h3        "bold {blue}"           # ### і нижче
+color-link type.bold         "bold {bright}"           # **жирний**
+color-link type.italic       "italic {text}"         # *курсив*
+color-link type.bolditalic   "bold italic {bright}"
+color-link type.strike       "{dim}"                # ~~закреслений~~
+color-link statement.quote   "italic {green}"         # > цитата
+color-link identifier.list   "bold {yellow}"           # маркери списків
+color-link identifier.todo   "bold {yellow}"           # - [ ]
+color-link identifier.done   "{dim}"                # - [x] виконане — приглушене
+color-link constant.linktext "{accent}"                # [текст посилання]
+color-link constant.image    "{accent2}"                # ![картинка]
+color-link underlined.url    "underline {muted}"      # адреса
+color-link symbol.table      "{faint}"                # | таблиці
+color-link symbol.hr         "{faint}"                # ---
+color-link symbol.fence      "{dim}"                # ``` рамки блоків коду
+color-link special.code      "{green},{surface}"        # `код у рядку` — на темній плашці
+color-link special.codeblock "{green}"                # блок коду без мови
+color-link special.codebody  "{text}"                # текст у блоках коду з мовою (саму мову фарбують її правила)

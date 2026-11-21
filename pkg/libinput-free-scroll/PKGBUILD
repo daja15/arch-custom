@@ -1,0 +1,60 @@
+# ╭──────────────────────────────────────────────────────────────╮
+# │  libinput-free-scroll — libinput з вільною прокруткою        │
+# │  тачпада (як на MacBook): двома пальцями можна вести в будь- │
+# │  якому напрямку, без прив'язки до однієї осі.                │
+# │                                                              │
+# │  Це офіційний libinput (той самий, що в Arch) + 2 правки     │
+# │  (free-scroll.patch):                                        │
+# │   1. вимкнено «рейки» прокрутки (tp_gesture_apply_scroll_    │
+# │      constraints): libinput більше не обнуляє рух по другій  │
+# │      осі, поки не вирішить, що рух «діагональний»;           │
+# │   2. друга вісь підключається одразу, без різкого ривка      │
+# │      (direction_lock_threshold 5 → 0).                       │
+# │                                                              │
+# │  Встановити (замінить пакет libinput, попросить пароль):     │
+# │      cd ~/dotfiles/pkg/libinput-free-scroll && makepkg -si   │
+# │  Потім вийди з сесії й зайди знову (Hyprland читає libinput  │
+# │  при старті).                                                │
+# │  Повернути звичайний:  sudo pacman -S libinput               │
+# │                                                              │
+# │  Оновлення: pacman -Syu НЕ оновлює цей пакет. Коли в Arch    │
+# │  вийде новий libinput — зміни pkgver нижче, sha256sums       │
+# │  (makepkg -g) і знову makepkg -si.                           │
+# ╰──────────────────────────────────────────────────────────────╯
+
+pkgname=libinput-free-scroll
+pkgver=1.32.0
+pkgrel=1
+pkgdesc="libinput with free (non axis-locked) two-finger touchpad scrolling"
+url="https://wayland.freedesktop.org/libinput/doc/latest/"
+arch=(x86_64)
+license=(MIT)
+depends=(glibc libevdev libgcc libwacom lua54 mtdev systemd-libs)
+makedepends=(meson)
+provides=("libinput=$pkgver" libinput.so)
+conflicts=(libinput)
+source=("https://gitlab.freedesktop.org/libinput/libinput/-/archive/$pkgver/libinput-$pkgver.tar.gz"
+        free-scroll.patch)
+sha256sums=('7dd6c1ca964c86eb6810ccd6639cda634e68bdca43bf3afec39e94e942fac8d4'
+            'SKIP')
+
+prepare() {
+  cd "libinput-$pkgver"
+  patch -Np1 -i ../free-scroll.patch
+}
+
+build() {
+  # Як в офіційному пакеті Arch, лише без тестів і графічного налагоджувача
+  arch-meson "libinput-$pkgver" build \
+    -D documentation=false \
+    -D tests=false \
+    -D debug-gui=false
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+  # Утиліти налагодження в Arch — окремий пакет libinput-tools; тут їх не ставимо (як в офіційному libinput)
+  rm -rf "$pkgdir"/usr/bin "$pkgdir"/usr/lib/libinput "$pkgdir"/usr/share/man "$pkgdir"/usr/share/zsh
+  install -Dm644 "libinput-$pkgver/COPYING" -t "$pkgdir/usr/share/licenses/$pkgname"
+}

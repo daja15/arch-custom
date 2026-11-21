@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Архіватор
+Comment=Розпакувати поруч (з Shift — вибрати куди)
+Exec=/home/jijau/.local/bin/arc open %F
+Icon=package-x-generic
+Terminal=false
+NoDisplay=true
+MimeType=application/zip;application/x-7z-compressed;application/gzip;application/x-gzip;application/x-compressed-tar;application/x-xz-compressed-tar;application/x-zstd-compressed-tar;application/x-bzip2-compressed-tar;application/x-tar;application/vnd.rar;application/x-rar;

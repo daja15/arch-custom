@@ -1,0 +1,123 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  ROFI — тема «Тиха ніч»                                      │
+   │  Суцільні кольори, без прозорості й фонових картинок —       │
+   │  відкривається миттєво й не навантажує GPU.                  │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+@import "~/.config/theme/gen/theme.rasi"   /* кольори, шрифти, заокруглення — з ~/.config/theme/theme.conf */
+
+* {
+    /* ── Базові властивості ── */
+    background-color: transparent;
+    text-color:       @text;
+    margin:  0;
+    padding: 0;
+    spacing: 0;
+}
+
+/* ───────────── ВІКНО ───────────── */
+/* Розміри — як у віджетів столу: текст 10pt (font-body), назва режиму — заголовок
+   (font-title, другий акцент), кнопки й рядки — заокруглення @radius-control */
+window {
+    font:             @font-body;
+    location:         center;      /* позиція: center / north / north west … */
+    anchor:           center;
+    width:            560px;       /* ширина меню */
+    border:           1px;         /* товщина рамки */
+    border-color:     @line;
+    border-radius:    @radius;     /* заокруглення (як вікна Hyprland) */
+    background-color: @surface;    /* суцільний фон — без alpha */
+    transparency:     "real";
+}
+
+mainbox {
+    padding:  16px;                /* = відступи карток столу (сітка 4 px) */
+    spacing:  12px;
+    children: [ inputbar, message, listview, mode-switcher ];  /* порядок блоків */
+}
+
+/* ───────────── РЯДОК ПОШУКУ ───────────── */
+inputbar {
+    padding:          12px 16px;
+    spacing:          12px;
+    border-radius:    @radius-control;
+    background-color: @overlay;
+    children:         [ prompt, entry ];
+}
+prompt {
+    font:       @font-title;       /* назва режиму — як заголовок картки */
+    text-color: @accent2;
+}
+entry {
+    placeholder:       "Пошук…";   /* підказка в порожньому полі */
+    placeholder-color: @muted;
+    cursor:            text;
+}
+
+/* ───────────── ПОВІДОМЛЕННЯ (напр. у меню живлення) ───────────── */
+message {
+    padding:          8px 12px;
+    border-radius:    @radius-control;
+    background-color: @bg;
+}
+textbox { text-color: @muted; }
+
+/* ───────────── СПИСОК ───────────── */
+listview {
+    lines:        8;               /* кількість рядків */
+    columns:      1;               /* кількість колонок */
+    fixed-height: true;            /* висота не стрибає при пошуку */
+    scrollbar:    false;           /* смуга прокрутки */
+    spacing:      4px;
+    cycle:        true;
+}
+
+element {
+    padding:       8px 12px;
+    spacing:       12px;
+    border-radius: @radius-control;
+    cursor:        pointer;
+}
+element normal.normal,
+element alternate.normal { background-color: transparent; text-color: @text; }
+
+element selected.normal {          /* виділений рядок = вибраний рядок віджетів (accent-bg) */
+    background-color: @accent-bg;
+    text-color:       @accent;
+}
+element normal.urgent,
+element alternate.urgent  { text-color: @red; }
+element selected.urgent   { background-color: @red; text-color: @bg; }
+element normal.active,
+element alternate.active  { text-color: @accent2; }  /* активне вікно у режимі «Вікна» */
+element selected.active   { background-color: @accent-bg; text-color: @accent2; }
+
+element-icon {
+    size:           22px;          /* розмір іконок програм */
+    vertical-align: 0.5;
+}
+element-text {
+    vertical-align: 0.5;
+    text-color:     inherit;
+    highlight:      @accent-bold;  /* підсвічування знайдених літер */
+}
+
+/* ───────────── ВКЛАДКИ ВНИЗУ ───────────── */
+mode-switcher {
+    spacing: 6px;
+}
+button {                           /* = кнопка віджетів (ui-btn) */
+    font:             @font-subtitle;
+    padding:          5px 12px;
+    border:           1px;
+    border-color:     @line;
+    border-radius:    @radius-control;
+    text-color:       @text;
+    background-color: @bg;
+    cursor:           pointer;
+}
+button selected {                  /* = увімкнена кнопка (ui-btn.primary) */
+    text-color:       @accent;
+    border-color:     @accent;
+    background-color: @accent-bg;
+}

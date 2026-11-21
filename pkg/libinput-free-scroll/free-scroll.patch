@@ -1,0 +1,24 @@
+--- a/src/evdev-mt-touchpad.c	2026-09-17 07:22:22.000000000 +0300
++++ b/src/evdev-mt-touchpad.c	2026-11-15 06:37:56.616276375 +0200
+@@ -3256,7 +3256,7 @@
+ 
+ 	/* In mm for touchpads with valid resolution, see tp_init_accel() */
+ 	tp->device->scroll.threshold = 0.0;
+-	tp->device->scroll.direction_lock_threshold = 5.0;
++	tp->device->scroll.direction_lock_threshold = 0.0; /* libinput-free-scroll: second axis joins immediately */
+ }
+ 
+ static int
+--- a/src/evdev-mt-touchpad-gestures.c	2026-09-17 07:22:22.000000000 +0300
++++ b/src/evdev-mt-touchpad-gestures.c	2026-11-15 06:37:56.615263016 +0200
+@@ -351,6 +351,10 @@
+ 		     INACTIVE_THRESHOLD = usec_from_millis(50),
+ 		     EVENT_TIMEOUT = usec_from_millis(100);
+ 
++	/* libinput-free-scroll: no axis locking for two-finger scrolling,
++	 * scroll freely in any direction (like macOS). */
++	return;
++
+ 	/* Both axes active == true means free scrolling is enabled */
+ 	if (tp->scroll.active.h && tp->scroll.active.v)
+ 		return;

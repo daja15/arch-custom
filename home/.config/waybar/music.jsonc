@@ -1,0 +1,119 @@
+// ╭──────────────────────────────────────────────────────────────╮
+// │  WAYBAR-MUSIC — смуга іконок лівої панелі «Музика»           │
+// │  Стоїть праворуч від висунутого терміналу. Окремий процес     │
+// │  waybar (~/.local/bin/waybar-music → waybar); запускає й      │
+// │  показує / ховає його hypr/music.lua. Після змін цього файлу: │
+// │  pkill -x waybar-music; hyprctl reload                       │
+// │  Кожна іконка = дія ~/.local/bin/music-ctl = гаряча клавіша.  │
+// │  Стани (грає / повтор) оновлюються лише на подіях плеєра.     │
+// ╰──────────────────────────────────────────────────────────────╯
+{
+    "layer": "top",
+    "position": "left",          // вертикальна смуга
+    "width": 48,                 // кружки 36 px + відступи (див. music.css); STRIP_W у music.lua (64) — з запасом
+    "margin-top": 8,             // відступи = gaps_out у Hyprland
+    "margin-bottom": 8,
+    "margin-left": 648,          // праворуч від терміналу: PANEL_W (640) + GAP (8) у hypr/music.lua
+    "spacing": 0,
+    "mode": "island",            // поверх вікон і клікабельна (як основна панель)
+    "modes": {
+        "island": {
+            "layer": "overlay",
+            "exclusive": false,  // не стискати вікна
+            "passthrough": false,// приймати кліки
+            "visible": true
+        }
+    },
+    "exclusive": false,
+    "passthrough": false,
+    "start_hidden": true,        // стартувати схованою
+    "on-sigusr1": "show",        // SIGUSR1 → показати
+    "on-sigusr2": "hide",        // SIGUSR2 → сховати
+    "reload_style_on_change": true,
+
+    // Зверху — керування, знизу — кількість скачаних треків
+    "modules-left":  ["custom/music-src-yt", "custom/music-src-lib", "custom/music-search", "custom/music-prev", "custom/music-play", "custom/music-next", "custom/music-repeat", "custom/music-save"],
+    "modules-right": ["custom/music-count", "custom/music-quit"],
+
+    // ───── Вибір плеєра: хто зараз грає ─────
+    // Підсвічена кнопка — головний плеєр (його слухаєш і ним керують клавіші).
+    // Клік — він грає, інший на паузі; не запущений — відкриється його вкладка.
+    // Оновлюється сигналом 10 (music-ctl use, служба music-active).
+    "custom/music-src-yt": {
+        "align": 0.5,
+        "exec": "~/.local/bin/music-ctl src yt",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 10,
+        "on-click": "~/.local/bin/music-ctl use yt"
+    },
+    "custom/music-src-lib": {
+        "align": 0.5,
+        "exec": "~/.local/bin/music-ctl src lib",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 10,
+        "on-click": "~/.local/bin/music-ctl use lib"
+    },
+    // Пошук у YouTube Music — вкладка «Пошук»
+    "custom/music-search": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "format": "\uf002",                                 // іконка лупи (кодом — щоб символ не загубився)
+        "tooltip-format": "Пошук (SUPER+Shift+F)",
+        "on-click": "~/.local/bin/music-ctl search"
+    },
+    // Попередній трек
+    "custom/music-prev": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "format": "󰒮",
+        "tooltip-format": "Попередній трек (SUPER+Shift+,)",
+        "on-click": "~/.local/bin/music-ctl prev"
+    },
+    // Пауза / відтворення: іконка показує, що станеться після кліку
+    "custom/music-play": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "exec": "~/.local/bin/music-ctl watch-play",     // безперервно, на подіях плеєра (без опитування)
+        "return-type": "json",
+        "restart-interval": 5,                            // якщо playerctl завершився — перезапустити
+        "on-click": "~/.local/bin/music-ctl play"
+    },
+    // Наступний трек
+    "custom/music-next": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "format": "󰒭",
+        "tooltip-format": "Наступний трек (SUPER+Shift+.)",
+        "on-click": "~/.local/bin/music-ctl next"
+    },
+    // Повтор одного треку: підсвічена, коли увімкнено
+    "custom/music-repeat": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "exec": "~/.local/bin/music-ctl watch-repeat",
+        "return-type": "json",
+        "restart-interval": 5,
+        "on-click": "~/.local/bin/music-ctl repeat"
+    },
+    // Скачати те, що зараз грає (з пошуку), у ~/Music
+    "custom/music-save": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "format": "󰇚",
+        "tooltip-format": "Скачати те, що грає, у ~/Music (SUPER+Shift+D)",
+        "on-click": "~/.local/bin/music-ctl save"
+    },
+    // Вийти: зупинити музику й закрити панель
+    "custom/music-quit": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "format": "󰗼",
+        "tooltip-format": "Вийти з музики (SUPER+Shift+Q)",
+        "on-click": "~/.local/bin/music-ctl quit"
+    },
+    // Кількість скачаних треків; оновлюється сигналом 9 після скачування (music-find)
+    "custom/music-count": {
+        "align": 0.5,                                     // іконка по центру кнопки
+        "exec": "~/.local/bin/music-ctl count",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 9,
+        "justify": "center",                               // число по центру під іконкою
+        "on-click": "~/.local/bin/music-ctl library"
+    }
+}

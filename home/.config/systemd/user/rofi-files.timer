@@ -1,0 +1,12 @@
+# Раз на 20 хв оновлювати кеш файлів для rofi (див. rofi-files.service).
+# Перевірити: systemctl --user list-timers
+[Unit]
+Description=Періодично оновлювати кеш файлів для rofi
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=20min
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

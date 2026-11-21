@@ -1,0 +1,717 @@
+#!/usr/bin/env python3
+# ╭──────────────────────────────────────────────────────────────╮
+# │  MUSIC-FIND — пошук музики в YouTube Music                   │
+# │  Вкладка «Пошук» лівої панелі «Музика» (hypr/music.lua).     │
+# │                                                              │
+# │  Пишеш запит → список пісень (або альбомів) → дія:           │
+# │    Enter   слухати (з цієї пісні й далі за списком)          │
+# │    Ctrl+D  скачати в ~/Music (у фоні, з тегами й обкладинкою)│
+# │    Ctrl+R  радіо: схожі пісні до вибраної                    │
+# │    Ctrl+A  перемкнути пошук: пісні ↔ альбоми                 │
+# │  Порожній Enter — МОЯ БІБЛІОТЕКА YouTube Music: улюблені,    │
+# │  твої плейлисти й альбоми (вхід — сесія YouTube з Firefox).  │
+# │  Музика грає у фоні (mpv): черга = список, з якого вибрано   │
+# │  пісню. Екран «Зараз грає»: r повтор, d скачати, n/p трек,   │
+# │  q назад (музика грає далі), s зупинити.                     │
+# │  Усі клавіші завжди виписані внизу екрана.                   │
+# │    Tab     вибрати кілька, Esc — новий пошук                 │
+# │                                                              │
+# │  Реклами немає: звук береться напряму через yt-dlp,          │
+# │  повз плеєр YouTube. Скачане грає kew (вкладка «Бібліотека»).│
+# │  Потрібно: yt-dlp mpv fzf python-ytmusicapi python-mutagen   │
+# ╰──────────────────────────────────────────────────────────────╯
+import glob
+import json
+import os
+import random
+import re
+import readline
+import shutil
+import time
+import subprocess
+import sys
+
+MUSIC   = os.path.expanduser("~/Music")                    # тека бібліотеки (= MUSIC у hypr/music-launch.sh)
+CACHE   = os.path.expanduser("~/.cache/music-find")
+HISTORY = os.path.join(CACHE, "history")                   # історія запитів (стрілки ↑ ↓)
+LOG     = os.path.join(CACHE, "download.log")              # журнал скачувань
+DL_DIR  = os.path.join(MUSIC, "youtube")                   # куди скачується: одна тека, без підтек
+RUN     = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+SOCK    = os.path.join(RUN, "music-mpv.sock")              # керування фоновим плеєром (mpv, JSON IPC)
+QUEUE   = os.path.join(RUN, "music-queue.json")            # черга, що грає: назви / виконавці / id
+LIMIT   = 30                                               # скільки результатів показувати
+SHUFFLE = True    # перемішувати чергу: пісні зі списку, альбоми, плейлисти (вибрана пісня — першою)
+LOOP    = True    # грати чергу по колу: після останньої — знову (новий порядок не робиться)
+
+# Кольори — з теми ~/.config/theme/theme.conf
+sys.path.insert(0, os.path.expanduser("~/.config/theme/gen"))
+from theme import C  # noqa: E402
+
+
+def ansi(hexcolor):
+    r, g, b = (int(hexcolor[i:i + 2], 16) for i in (1, 3, 5))
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+RESET = "\033[0m"
+
+# Формат для прослуховування: HLS-аудіо (m3u8, AAC ~130 кбіт/с).
+# Як mpv отримує звук пісні з YouTube (посилання HLS, назва, виконавець) — легкий скрипт
+# замість вбудованого ytdl_hook (той тік пам'яттю). Формат звуку — теж там.
+YTDL_LITE = os.path.expanduser("~/.config/music-find/ytdl-lite.lua")
+
+# Обрізати обкладинку до квадрата (YouTube дає 16:9 з чорними смугами)
+CROP = ("ThumbnailsConvertor+FFmpeg_o:-c:v mjpeg -qmin 1 -qscale:v 1 "
+        "-vf crop=\"'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'\"")
+
+
+# ───────────── ГАРЯЧІ КЛАВІШІ (виписані внизу екрана) ─────────────
+# Глобальні — працюють звідусіль; ті самі дії, що й іконки праворуч від панелі (music-ctl)
+KEYS_GLOBAL = ["SUPER+Shift: F пошук · P пауза · , . трек · L повтор",
+               "SUPER+Shift: D скачати те, що грає · Q вихід з музики",
+               "SUPER+A сховати панель · Alt+1 бібліотека · Alt+2 пошук"]
+KEYS_PROMPT = ["Enter шукати · порожній Enter — моя бібліотека YouTube Music",
+               "↑ ↓ історія запитів"]
+KEYS_LIB    = ["Enter відкрити · Ctrl+P слухати всю · Ctrl+D скачати всю · Ctrl+O зараз грає",
+               "Tab кілька · Esc назад"]
+KEYS_LIST   = ["Enter слухати · Ctrl+D скачати · Ctrl+R радіо · Tab кілька",
+               "Ctrl+A пісні ↔ альбоми · Ctrl+O зараз грає · Esc назад"]
+KEYS_PLAY   = ["Пробіл пауза · ← → перемотка · 9 0 гучність · m без звуку",
+               "n / > наступна · p / < попередня · r повтор · d скачати",
+               "q назад (музика грає далі) · s зупинити"]
+
+
+def footer(lines):
+    """Закріпити підказки внизу екрана; решта виводу прокручується над ними."""
+    cols, rows = shutil.get_terminal_size()
+    n = len(lines) + 1                                   # + лінія-розділювач
+    out = [f"\033[{rows - n + 1};1H", ansi(C["line"]) + "─" * cols + RESET]
+    for i, ln in enumerate(lines):
+        color = C["muted"] if i < len(lines) - len(KEYS_GLOBAL) else C["accent2"]
+        out.append(f"\033[{rows - n + 2 + i};1H\033[2K {ansi(color)}{ln[:cols - 2]}{RESET}")
+    out.append(f"\033[1;{rows - n}r\033[H")              # область прокрутки — над підказками, курсор угору
+    sys.stdout.write("".join(out))
+    sys.stdout.flush()
+
+
+def footer_off():
+    sys.stdout.write("\033[r")                            # повернути прокрутку на весь екран
+    sys.stdout.flush()
+
+
+def url(video_id):
+    return f"https://music.youtube.com/watch?v={video_id}"
+
+
+def safe(name):
+    """Назва для файлу/теки: без / та службових символів."""
+    name = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "_", (name or "").strip()).strip(". ")
+    return name[:120] or "Без назви"
+
+
+def artists(item):
+    return ", ".join(a["name"] for a in (item.get("artists") or []) if a.get("name")) or "Невідомий"
+
+
+def track_from(item, album=None, year=None, number=None):
+    """Привести пісню з ytmusicapi до одного вигляду."""
+    alb = album or ((item.get("album") or {}).get("name") if isinstance(item.get("album"), dict) else item.get("album"))
+    return {
+        "id":     item.get("videoId"),
+        "title":  item.get("title") or "?",
+        "artist": artists(item),
+        "album":  alb or "",
+        "year":   str(year or item.get("year") or ""),
+        "number": number or item.get("trackNumber"),
+        "dur":    item.get("duration") or "",
+    }
+
+
+def target(t):
+    """Шлях без розширення: усе скачане — в одній теці ~/Music/youtube/«Виконавець - Назва».
+    Альбом, номер і рік лишаються в тегах файлу (kew групує за ними)."""
+    first_artist = t["artist"].split(", ")[0]
+    return os.path.join(DL_DIR, safe(f"{first_artist} - {t['title']}"))
+
+
+def downloaded(t):
+    return bool(glob.glob(glob.escape(target(t)) + ".*"))
+
+
+def song_row(t):
+    """Рядок пісні для fzf: значок (вже скачано) · назва · виконавець · тривалість."""
+    mark = ansi(C["green"]) + "\U000f012c" if downloaded(t) else " "   # значок Nerd Font (не емодзі)
+    line = (f"{mark} {ansi(C['text'])}{t['title'][:34]:<34}{RESET} "
+            f"{ansi(C['muted'])}{t['artist'][:22]:<22} {t['dur']:>5}{RESET}")
+    return "s:" + t["id"], line
+
+
+# ───────────── ПОШУК (ytmusicapi) ─────────────
+_yt = None
+
+
+def yt():
+    global _yt
+    if _yt is None:
+        from ytmusicapi import YTMusic
+        _yt = YTMusic()
+    return _yt
+
+
+def search(query, kind):
+    """kind: songs | albums → список рядків для fzf і словник id → дані."""
+    res = yt().search(query, filter=kind, limit=LIMIT)
+    rows, data = [], {}
+    for r in res:
+        if kind == "songs":
+            if not r.get("videoId"):
+                continue
+            t = track_from(r)
+            key, line = song_row(t)
+            data[key] = t
+        else:
+            if not r.get("browseId"):
+                continue
+            kind_name = r.get("type") or "Альбом"
+            line = (f"  {ansi(C['accent2'])}{(r.get('title') or '?')[:30]:<30}{RESET} "
+                    f"{ansi(C['muted'])}{artists(r)[:20]:<20} {kind_name[:6]:<6} {r.get('year') or '':>4}{RESET}")
+            key = "a:" + r["browseId"]
+            data[key] = r
+        rows.append(f"{key}\t{line}")
+    return rows, data
+
+
+def album_tracks(browse_id):
+    a = yt().get_album(browse_id)
+    year = a.get("year")
+    out = []
+    for i, tr in enumerate(a.get("tracks") or [], 1):
+        if tr.get("videoId"):
+            out.append(track_from(tr, album=a.get("title"), year=year, number=tr.get("trackNumber") or i))
+    return out
+
+
+def radio(video_id):
+    w = yt().get_watch_playlist(videoId=video_id, radio=True, limit=25)
+    return [track_from(t) for t in (w.get("tracks") or []) if t.get("videoId")]
+
+
+# ───────────── МОЯ БІБЛІОТЕКА (твій акаунт YouTube Music) ─────────────
+# Вхід — сесія YouTube з Firefox: cookies читаються (як yt-dlp --cookies-from-browser)
+# лише в пам'ять на час роботи; на диск нічого не записується.
+_my = None
+
+
+def my_yt():
+    global _my
+    if _my is None:
+        from yt_dlp.cookies import extract_cookies_from_browser
+        from ytmusicapi import YTMusic
+
+        class Quiet:              # без службових повідомлень yt-dlp
+            def debug(self, *a, **k): pass
+            info = warning = error = debug
+
+        jar = extract_cookies_from_browser("firefox", logger=Quiet())
+        ck = {c.name: c.value for c in jar if c.domain.endswith("youtube.com")}
+        if "__Secure-3PAPISID" not in ck:
+            raise RuntimeError("не знайдено входу в YouTube — увійди на music.youtube.com у Firefox")
+        _my = YTMusic(auth={
+            "cookie": "; ".join(f"{k}={v}" for k, v in ck.items()),
+            "authorization": "SAPISIDHASH 0",     # ytmusicapi сам рахує справжній підпис перед кожним запитом
+            "x-goog-authuser": "0",               # перший акаунт Google у браузері
+            "origin": "https://music.youtube.com",
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+            "accept": "*/*",
+            "content-type": "application/json",
+        })
+    return _my
+
+
+def library_rows():
+    """Улюблені + твої плейлисти + збережені альбоми."""
+    rows = [f"p:LM\t{ansi(C['red'])}\U000f02d1 {ansi(C['text'])}Улюблені треки{RESET}"]
+    for pl in my_yt().get_library_playlists(limit=None) or []:
+        pid = pl.get("playlistId")
+        if not pid or pid == "LM":
+            continue
+        cnt = pl.get("count") or ""
+        rows.append(f"p:{pid}\t{ansi(C['accent'])}\U000f0cb8 {ansi(C['text'])}{(pl.get('title') or '?')[:44]:<44}"
+                    f"{ansi(C['muted'])} {cnt}{RESET}")
+    for al in my_yt().get_library_albums(limit=None) or []:
+        if al.get("browseId"):
+            rows.append(f"a:{al['browseId']}\t{ansi(C['accent2'])}󰀥 {ansi(C['text'])}{(al.get('title') or '?')[:30]:<30}"
+                        f"{ansi(C['muted'])} {artists(al)[:18]}{RESET}")
+    return rows
+
+
+def playlist_tracks(pid):
+    if pid == "LM":
+        res = my_yt().get_liked_songs(limit=None)
+    else:
+        res = my_yt().get_playlist(pid, limit=None)
+    return [track_from(t) for t in (res.get("tracks") or []) if t.get("videoId")]
+
+
+def expand(keys, data):
+    """Вибрані рядки → список пісень (альбоми розгортаються в треки)."""
+    tracks = []
+    for k in keys:
+        if k.startswith("s:"):
+            tracks.append(data[k])
+        elif k.startswith("a:"):
+            print(f"{ansi(C['muted'])}Завантажую альбом…{RESET}")
+            tracks += album_tracks(k[2:])
+        elif k.startswith("p:"):
+            print(f"{ansi(C['muted'])}Завантажую плейлист…{RESET}")
+            tracks += playlist_tracks(k[2:])
+    return tracks
+
+
+# ───────────── ПЛЕЄР (фоновий mpv) ─────────────
+# mpv грає у фоні, окремо від цього вікна: можна повертатись до списків і шукати далі,
+# музика не зупиняється. Черга = список, з якого вибрано пісню, тож наступний /
+# попередній трек працюють (іконки, SUPER+Shift+. / ,, клавіші тут). Плеєр сам
+# закривається, коли черга скінчилась; керується через JSON IPC (SOCK) і MPRIS.
+def mpv(*cmd):
+    """Одна команда фоновому mpv. Повертає data або None (плеєр не запущений / помилка)."""
+    import socket
+    try:
+        so = socket.socket(socket.AF_UNIX)
+        so.settimeout(1.5)
+        so.connect(SOCK)
+    except OSError:
+        return None
+    with so:
+        try:
+            so.sendall((json.dumps({"command": list(cmd), "request_id": 7}) + "\n").encode())
+            buf = b""
+            while True:
+                chunk = so.recv(65536)
+                if not chunk:
+                    return None
+                buf += chunk
+                for ln in buf.split(b"\n"):
+                    try:
+                        msg = json.loads(ln)
+                    except ValueError:
+                        continue
+                    if msg.get("request_id") == 7:
+                        return msg.get("data") if msg.get("error") == "success" else None
+        except OSError:
+            return None
+
+
+def mpv_alive():
+    return mpv("get_property", "pid") is not None
+
+
+def mpv_start():
+    if mpv_alive():
+        return True
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
+    subprocess.Popen(["mpv", "--idle=once", "--no-video", "--no-terminal", "--audio-display=no",
+                      f"--input-ipc-server={SOCK}",
+                      # посилання з YouTube — свій легкий скрипт замість вбудованого ytdl_hook
+                      # (той тік на ~12 МБ з кожною піснею): ~/.config/music-find/ytdl-lite.lua
+                      "--ytdl=no", "--script=" + YTDL_LITE,
+                      # кеш для МУЗИКИ, а не відео: за замовчуванням mpv тримає до ~200 МБ наперед;
+                      # хвилини звуку (кілька МБ) вистачає з запасом навіть на поганому інтернеті
+                      "--cache-secs=120", "--demuxer-max-bytes=16MiB", "--demuxer-max-back-bytes=4MiB"],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+    for _ in range(50):
+        if mpv_alive():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def play(tracks, start=None, view=True):
+    """Поставити чергу й грати. start — вибрана пісня (грає першою); None — альбом / плейлист
+    цілком. view — відкрити екран «Зараз грає»."""
+    if not tracks:
+        return
+    tracks = list(tracks)
+    if SHUFFLE and len(tracks) > 1:            # хаотичний порядок
+        first = [tracks.pop(start)] if start is not None else []
+        random.shuffle(tracks)
+        tracks = first + tracks
+        start = 0
+    start = start or 0
+    subprocess.run(["playerctl", "-p", "kew", "pause"], stderr=subprocess.DEVNULL)   # kew — на паузу, щоб не грали двоє
+    if not mpv_start():
+        return wait("Не вдалося запустити mpv")
+    m3u = os.path.join(CACHE, "queue.m3u")
+    with open(m3u, "w") as f:                 # плейлист із назвами (видно в MPRIS / підказках)
+        f.write("#EXTM3U\n")
+        for t in tracks:
+            f.write(f"#EXTINF:-1,{t['artist']} - {t['title']}\n{url(t['id'])}\n")
+    with open(QUEUE, "w") as f:
+        json.dump(tracks, f)
+    mpv("set_property", "playlist-start", int(start))
+    mpv("loadlist", m3u, "replace")
+    mpv("set_property", "loop-playlist", "inf" if LOOP else "no")   # черга по колу
+    if view:
+        now_playing()
+
+
+def queue():
+    try:
+        with open(QUEUE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def fmt_time(sec):
+    if sec is None:
+        return "--:--"
+    sec = int(sec)
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def now_playing():
+    """Екран «Зараз грає». q — назад (музика грає далі)."""
+    import select
+    import termios
+    import tty
+    if not mpv_alive():
+        return wait("Зараз нічого не грає")
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    os.system("clear")
+    footer(KEYS_PLAY + KEYS_GLOBAL)
+    sys.stdout.write("\033[?25l")             # сховати курсор
+    try:
+        tty.setcbreak(fd)
+        while True:
+            if not mpv_alive():
+                break                         # черга скінчилась — плеєр закрився
+            pos = mpv("get_property", "playlist-pos") or 0
+            count = mpv("get_property", "playlist-count") or 0
+            q = queue()
+            t = q[pos] if 0 <= pos < len(q) else {"title": mpv("get_property", "media-title") or "…", "artist": ""}
+            tp, dur = mpv("get_property", "time-pos"), mpv("get_property", "duration")
+            paused = mpv("get_property", "pause")
+            loop = mpv("get_property", "loop-file") not in (False, "no", None)
+            mute = mpv("get_property", "mute")
+            vol = mpv("get_property", "volume")
+            cols = shutil.get_terminal_size().columns
+            bar_w = max(10, cols - 20)
+            done = int(bar_w * (tp or 0) / dur) if dur else 0
+            a, m, x, tx = ansi(C["accent"]), ansi(C["muted"]), ansi(C["accent2"]), ansi(C["text"])
+            loop_q = mpv("get_property", "loop-playlist") not in (False, "no", None)
+            modes = "".join([f"   {x}󰑘 повтор{RESET}" if loop else (f"   {m}󰑖 по колу{RESET}" if loop_q else ""),
+                             f"   {m}󰒝 вперемішку{RESET}" if SHUFFLE else "",
+                             f"   {x}󰝟 без звуку{RESET}" if mute else ""])
+            out = ["\033[H",
+                   f"\n  {m}ЗАРАЗ ГРАЄ · {pos + 1} з {count}{RESET}\033[K\n",
+                   f"\n  {a}{'⏸' if paused else '▶'}  {tx}{t['title'][:cols - 8]}{RESET}\033[K\n",
+                   f"     {m}{t.get('artist', '')[:cols - 8]}{RESET}\033[K\n\n",
+                   f"  {a}{'━' * done}{m}{'─' * (bar_w - done)}{RESET} {fmt_time(tp)} / {fmt_time(dur)}\033[K\n",
+                   f"  {m}гучність {int(vol or 0)}%{RESET}{modes}\033[K\n\n",
+                   f"  {m}ДАЛІ{RESET}\033[K\n"]
+            nxt = q[pos + 1:pos + 6]
+            for n in nxt:
+                out.append(f"    {tx}{n['title'][:cols // 2]}{RESET} {m}· {n['artist'][:cols // 3]}{RESET}\033[K\n")
+            if not nxt:
+                out.append(f"    {m}кінець черги{RESET}\033[K\n")
+            out.append("\033[J")               # стерти залишки (до підказок унизу)
+            sys.stdout.write("".join(out))
+            sys.stdout.flush()
+
+            r, _, _ = select.select([fd], [], [], 0.5)
+            if not r:
+                continue
+            k = os.read(fd, 8).decode(errors="ignore")
+            if k in ("q", "\x1b"):
+                break
+            elif k == " ":
+                mpv("cycle", "pause")
+            elif k in ("n", ">", "."):
+                mpv("playlist-next")
+            elif k in ("p", "<", ","):
+                mpv("playlist-prev")
+            elif k == "\x1b[C":
+                mpv("seek", 5)
+            elif k == "\x1b[D":
+                mpv("seek", -5)
+            elif k == "9":
+                mpv("add", "volume", -5)
+            elif k == "0":
+                mpv("add", "volume", 5)
+            elif k == "m":
+                mpv("cycle", "mute")
+            elif k == "r":
+                mpv("cycle-values", "loop-file", "inf", "no")
+            elif k == "d" and "id" in t:
+                download([t], quiet=True)
+            elif k == "s":
+                mpv("quit")
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\033[?25h")
+        footer_off()
+
+
+# ───────────── ДІЇ ─────────────
+def download(tracks, quiet=False):
+    """Скачати у фоні: окремий процес, сповіщення по завершенні. Можна далі шукати й слухати."""
+    todo = [t for t in tracks if not downloaded(t)]
+    if not todo:
+        notify("Уже в бібліотеці", tracks[0]["title"] if len(tracks) == 1 else f"{len(tracks)} пісень")
+        return
+    os.makedirs(CACHE, exist_ok=True)
+    log = open(LOG, "a")
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "--get", json.dumps(todo)],
+                     stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
+    notify("Скачую", todo[0]["title"] + " — " + todo[0]["artist"] if len(todo) == 1 else f"{len(todo)} пісень")
+    if not quiet:
+        print(f"{ansi(C['green'])}↓ Скачую у фоні: {len(todo)} — сповіщу, коли готово{RESET}")
+
+
+def notify(title, body=""):
+    subprocess.Popen(["notify-send", "-a", "Музика", "-i", "audio-x-generic", title, body],
+                     stderr=subprocess.DEVNULL)
+
+
+def save_url(link):
+    """Режим --save: скачати те, що зараз грає (клавіша d у mpv, SUPER+Shift+D)."""
+    m = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", link or "")
+    if not m:
+        notify("Не вдалося скачати", "це не трек з YouTube (локальні файли вже в бібліотеці)")
+        return
+    vid = m.group(1)
+    try:   # назва, виконавець, альбом — з YouTube Music
+        t = track_from(yt().get_watch_playlist(videoId=vid, limit=1)["tracks"][0])
+        t["id"] = vid
+    except Exception:
+        t = {"id": vid, "title": vid, "artist": "Невідомий", "album": "", "year": "", "number": None, "dur": ""}
+    if downloaded(t):
+        notify("Уже в бібліотеці", f"{t['title']} — {t['artist']}")
+        return
+    notify("Скачую", f"{t['title']} — {t['artist']}")
+    get_worker([t])
+
+
+def get_worker(tracks):
+    """Режим --get: скачування (запускається у фоні з download())."""
+    from mutagen import File as MFile
+    ok, failed = [], []
+    for t in tracks:
+        base = target(t)
+        os.makedirs(os.path.dirname(base), exist_ok=True)
+        cmd = ["yt-dlp", "-f", "bestaudio/best", "-x",            # лише звук, без перекодування (зазвичай opus)
+               "--embed-thumbnail", "--convert-thumbnails", "jpg", "--ppa", CROP,   # квадратна обкладинка в файлі
+               "--embed-metadata", "--no-playlist", "--no-progress", "--quiet",
+               "--retries", "10", "--fragment-retries", "10",   # YouTube інколи відповідає 403 — повторити
+               "--print", "after_move:filepath",
+               "-o", base.replace("%", "%%") + ".%(ext)s", url(t["id"])]
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        path = (p.stdout.strip().splitlines() or [""])[-1]
+        if p.returncode != 0 or not os.path.exists(path):
+            failed.append(t)
+            print(f"ПОМИЛКА {t['title']}: {p.stderr.strip()[-500:]}", flush=True)
+            continue
+        try:   # теги з YouTube Music точніші, ніж з відео: назва, виконавець, альбом, номер, рік
+            f = MFile(path, easy=True)
+            if f is not None:
+                if f.tags is None:
+                    f.add_tags()
+                f["title"], f["artist"] = [t["title"]], [t["artist"]]
+                if t["album"]:
+                    f["album"] = [t["album"]]
+                if t.get("number"):
+                    f["tracknumber"] = [str(t["number"])]
+                if t.get("year"):
+                    f["date"] = [t["year"]]
+                f.save()
+        except Exception as e:
+            print(f"теги {path}: {e}", flush=True)
+        ok.append(t)
+        print(f"OK {path}", flush=True)
+    if ok:
+        notify("Скачано" if not failed else f"Скачано {len(ok)} з {len(tracks)}",
+               ok[0]["title"] + " — " + ok[0]["artist"] if len(ok) == 1 else f"{len(ok)} пісень у ~/Music")
+    if failed:
+        notify("Не вдалося скачати", f"{len(failed)}: див. {LOG}")
+    subprocess.run(["pkill", "-RTMIN+9", "-x", "waybar-music"])   # оновити лічильник скачаних на смузі іконок
+
+
+# ───────────── ІНТЕРФЕЙС ─────────────
+FZF_COLORS = (f"bg+:{C['overlay']},fg+:{C['text']},hl:{C['accent']},hl+:{C['accent']},"
+              f"pointer:{C['accent']},marker:{C['accent2']},prompt:{C['accent']},"
+              f"header:{C['muted']},info:{C['muted']},border:{C['line']},gutter:-1")
+
+
+def pick(rows, label, prompt, keys, expect):
+    """fzf зі списком. Повертає (клавіша, вибрані ключі) або (None, []) на Esc."""
+    footer_off()                         # fzf малює підказки сам (--footer)
+    p = subprocess.run(
+        ["fzf", "--ansi", "--multi", "--no-sort", "--layout=reverse", "--delimiter=\t", "--with-nth=2",
+         f"--expect={expect}", f"--prompt={prompt} › ", "--footer=" + "\n".join(keys + KEYS_GLOBAL),   # усі клавіші — внизу
+         f"--color=footer:{C['muted']},footer-border:{C['line']}", "--footer-border=line",
+         "--info=inline-right", "--pointer=▶", "--marker=+", f"--color={FZF_COLORS}",
+         f"--border-label= {label} ", "--border=rounded"],
+        input="\n".join(rows), stdout=subprocess.PIPE, text=True)
+    if p.returncode not in (0, 1) or not p.stdout:
+        return None, []
+    lines = p.stdout.rstrip("\n").split("\n")
+    return lines[0], [ln.split("\t", 1)[0] for ln in lines[1:] if ln]
+
+
+def wait(msg):
+    print(f"  {msg}")
+    input(f"  {ansi(C['muted'])}Enter — назад{RESET}")
+
+
+def song_actions(key, keys, data, rows):
+    """Спільні дії для списку пісень: слухати / скачати / радіо / зараз грає."""
+    if key == "ctrl-o":
+        now_playing()
+    elif key == "ctrl-r":
+        songs = [k for k in keys if k.startswith("s:")]
+        if songs:
+            print(f"  {ansi(C['muted'])}Збираю радіо…{RESET}")
+            play(radio(songs[0][2:]), start=0)   # радіо: спершу сама пісня, далі схожі вперемішку
+    elif key == "ctrl-d":
+        download(expand(keys, data))
+    elif len(keys) == 1 and keys[0].startswith("s:"):
+        # одна пісня → черга = увесь список пісень, починаючи з неї (наступна / попередня працюють)
+        order = [r.split("\t", 1)[0] for r in rows if r.startswith("s:")]
+        play([data[k] for k in order], start=order.index(keys[0]))
+    else:
+        play(expand(keys, data))          # кілька вибраних (Tab) або альбом
+
+
+def browse_tracks(tracks, label):
+    """Список пісень плейлиста / альбому."""
+    data, rows = {}, []
+    for t in tracks:
+        k, line = song_row(t)
+        data[k] = t
+        rows.append(f"{k}\t{line}")
+    if not rows:
+        return wait("Тут порожньо")
+    while True:
+        key, keys = pick(rows, label, "пісні", KEYS_LIST[:1] + ["Ctrl+O зараз грає · Esc назад"],
+                         "enter,ctrl-d,ctrl-r,ctrl-o")
+        if key is None:
+            return
+        try:
+            song_actions(key, keys, data, rows)
+        except Exception as e:
+            wait(f"Помилка: {e}")
+
+
+def library():
+    """Моя бібліотека YouTube Music: улюблені, плейлисти, альбоми."""
+    print(f"  {ansi(C['muted'])}Відкриваю твою бібліотеку YouTube Music…{RESET}")
+    try:
+        rows = library_rows()
+    except Exception as e:                # немає входу — все одно показати «Зараз грає»
+        rows = [f"err:\t{ansi(C['red'])}Бібліотека недоступна: {str(e)[:60]}{RESET}"]
+    names = {r.split("\t", 1)[0]: re.sub(r"\033\[[0-9;]*m", "", r.split("\t", 1)[1]).strip() for r in rows}
+    while True:
+        shown = rows
+        if mpv_alive():                   # зверху — «Зараз грає» (Enter відкриває плеєр)
+            q, pos = queue(), mpv("get_property", "playlist-pos") or 0
+            cur = q[pos]["title"] if 0 <= pos < len(q) else (mpv("get_property", "media-title") or "")
+            shown = [f"np:\t{ansi(C['accent'])}▶ Зараз грає: {ansi(C['text'])}{cur[:44]}{RESET}"] + rows
+        key, keys = pick(shown, "моя бібліотека YouTube Music", "бібліотека", KEYS_LIB, "enter,ctrl-d,ctrl-p,ctrl-o")
+        if key is None:
+            return
+        try:
+            if key == "ctrl-o" or (keys and keys[0] == "np:"):
+                now_playing()
+            elif key == "ctrl-d":
+                download(expand(keys, {}))
+            elif key == "ctrl-p":
+                play(expand(keys, {}))
+            elif keys and not keys[0].startswith("err:"):
+                tracks = expand(keys[:1], {})
+                browse_tracks(tracks, names.get(keys[0], ""))
+        except Exception as e:
+            wait(f"Помилка: {e}")
+
+
+def search_results(query, kind):
+    """Результати пошуку; повертає нове значення kind (Ctrl+A перемикає пісні ↔ альбоми)."""
+    rows = None
+    while True:               # список результатів; після дії повертаємось до нього
+        if rows is None:      # шукаємо лише для нового запиту / при зміні пісні ↔ альбоми
+            print(f"  {ansi(C['muted'])}Шукаю…{RESET}")
+            try:
+                rows, data = search(query, kind)
+            except Exception as e:
+                wait(f"Помилка пошуку: {e}")
+                return kind
+            if not rows:
+                wait("Нічого не знайдено")
+                return kind
+        key, keys = pick(rows, query, "пісні" if kind == "songs" else "альбоми", KEYS_LIST,
+                         "enter,ctrl-d,ctrl-r,ctrl-a,ctrl-o")
+        if key is None:
+            return kind       # Esc — новий запит
+        if key == "ctrl-a":
+            kind = "albums" if kind == "songs" else "songs"
+            rows = None
+            continue
+        try:
+            song_actions(key, keys, data, rows)
+        except Exception as e:
+            wait(f"Помилка: {e}")
+
+
+def banner():
+    os.system("clear")
+    footer(KEYS_PROMPT + KEYS_GLOBAL)
+    a, m = ansi(C["accent"]), ansi(C["muted"])
+    print(f"\n  {a}\uf002  Пошук у YouTube Music{RESET}")
+    print(f"  {m}порожній Enter — моя бібліотека · скачане — у вкладці «Бібліотека» (kew){RESET}")
+    if mpv_alive():
+        q, pos = queue(), mpv("get_property", "playlist-pos") or 0
+        cur = q[pos]["title"] + " — " + q[pos]["artist"] if 0 <= pos < len(q) else ""
+        print(f"  {a}▶ {cur}{RESET}  {m}(порожній Enter → «Зараз грає»){RESET}")
+    print()
+
+
+def main():
+    os.makedirs(CACHE, exist_ok=True)
+    try:
+        readline.read_history_file(HISTORY)
+    except OSError:
+        pass
+    kind = "songs"
+    started = os.path.getmtime(__file__)
+    while True:
+        # Скрипт оновили — перезапуститись із новою версією (Python читає файл лише при старті)
+        if os.path.getmtime(__file__) != started:
+            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)])
+        banner()
+        try:
+            query = input(f"  {ansi(C['accent'])}›{RESET} ").strip()
+        except (EOFError, KeyboardInterrupt):   # Ctrl+D / Ctrl+C у рядку пошуку — просто новий рядок
+            continue
+        if not query:
+            library()         # порожній Enter — моя бібліотека YouTube Music
+            continue
+        readline.write_history_file(HISTORY)
+        kind = search_results(query, kind)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--get":
+        get_worker(json.loads(sys.argv[2]))
+    elif len(sys.argv) == 3 and sys.argv[1] == "--save":
+        save_url(sys.argv[2])
+    else:
+        try:
+            main()
+        except KeyboardInterrupt:
+            pass

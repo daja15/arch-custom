@@ -1,0 +1,165 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  MUSIC-CTL — керування музикою панелі «Музика»               │
+# │  Одні й ті самі дії для іконок (waybar/music.jsonc) і        │
+# │  гарячих клавіш (hypr/keyBinds.lua):                         │
+# │    search   відкрити панель на вкладці «Пошук»   SUPER+Shift+F│
+# │    library  відкрити вкладку «Бібліотека» (kew)              │
+# │    play     пауза / відтворення                SUPER+Shift+P  │
+# │    next     наступний трек                     SUPER+Shift+.  │
+# │    prev     попередній трек                    SUPER+Shift+,  │
+# │    repeat   повтор треку ↔ список по колу      SUPER+Shift+L  │
+# │    save     скачати те, що грає, у ~/Music     SUPER+Shift+D  │
+# │    quit     вийти: зупинити музику, закрити панель SUPER+Shift+Q│
+# │    use yt|lib  вибрати плеєр: YouTube (mpv) / бібліотека (kew) │
+# │             — він грає, інший на паузі (кнопки вгорі смуги)  │
+# │    media play|next|prev  медіаклавіші клавіатури: те, що грає │
+# │             (і браузер теж), інакше — вибраний плеєр центру  │
+# │  Для іконок (безперервно, лише на подіях D-Bus, без опитування):│
+# │    watch-play, watch-repeat, count                           │
+# │  Керує лише АКТИВНИМ плеєром (через MPRIS / playerctl):      │
+# │    1) тим, що зараз грає (mpv — «Пошук», kew — «Бібліотека»); │
+# │    2) якщо обидва на паузі — тим, що грав останнім           │
+# │       (записує music-active, він же ставить другий на паузу).│
+# │  Інший плеєр клавіші не чіпають. Браузер — теж ні.           │
+# ╰──────────────────────────────────────────────────────────────╯
+STATE="${XDG_RUNTIME_DIR:-/tmp}/music-active"     # останній активний плеєр (пише music-active)
+SOCK="unix:${XDG_RUNTIME_DIR:-/tmp}/music-kitty"   # керування вкладками kitty (див. hypr/music-launch.sh)
+MUSIC="$HOME/Music"
+
+ours() {  # плеєри музичного центру, що зараз існують
+    playerctl -l 2>/dev/null | while read -r p; do
+        case "$p" in mpv*|kew*) echo "$p" ;; esac
+    done
+}
+
+active() {  # активний плеєр: той, що грає → останній активний → будь-який наш
+    list=$(ours)
+    for p in $list; do
+        [ "$(playerctl -p "$p" status 2>/dev/null)" = "Playing" ] && { echo "$p"; return; }
+    done
+    last=$(cat "$STATE" 2>/dev/null)
+    for p in $list; do [ "$p" = "$last" ] && { echo "$p"; return; }; done
+    for p in $list; do echo "$p"; return; done
+}
+
+pc() {  # pc <дія…> — playerctl для активного плеєра (немає плеєра — нічого)
+    a=$(active)
+    [ -n "$a" ] && playerctl -p "$a" "$@"
+}
+
+tab() {   # tab <назва вкладки> — показати панель і перейти на вкладку
+    hyprctl eval 'MusicShow()' >/dev/null
+    # панель могла щойно запускатись — кілька спроб, поки kitty не відповість
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kitty @ --to "$SOCK" focus-tab --match "title:^$1" >/dev/null 2>&1 && return
+        sleep 0.3
+    done
+}
+
+kind_of() {  # kind_of <плеєр> → yt | lib
+    case "$1" in kew*) echo lib ;; *) echo yt ;; esac
+}
+
+player_of() {  # player_of yt|lib → назва плеєра, якщо він запущений
+    for p in $(ours); do
+        [ "$(kind_of "$p")" = "$1" ] && { echo "$p"; return; }
+    done
+}
+
+refresh_src() { pkill -RTMIN+10 -x waybar-music 2>/dev/null; }   # кнопки вибору плеєра (signal 10 у music.jsonc)
+
+json() {  # json <текст> <підказка> <клас>
+    printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$1" "$2" "$3"
+}
+
+case "$1" in
+    search)  tab "Пошук" ;;
+    library) tab "Бібліотека" ;;
+    play)    pc play-pause ;;
+    use)     # use yt|lib — зробити плеєр головним: він грає, інший — на паузі
+        want=$2
+        p=$(player_of "$want")
+        if [ -z "$p" ]; then                       # ще не запущений — відкрити його вкладку
+            [ "$want" = lib ] && tab "Бібліотека" || tab "Пошук"
+            exit 0
+        fi
+        echo "$p" > "$STATE"
+        for o in $(ours); do
+            [ "$o" = "$p" ] || { [ "$(playerctl -p "$o" status 2>/dev/null)" = "Playing" ] && playerctl -p "$o" pause; }
+        done
+        playerctl -p "$p" play 2>/dev/null
+        [ "$want" = lib ] && who="Бібліотека" || who="YouTube"
+        swayosd-client --custom-message "Грає: $who" --custom-icon audio-x-generic >/dev/null 2>&1
+        refresh_src ;;
+    media)   # медіаклавіші: спершу те, що вже грає (браузер теж), інакше — вибраний плеєр центру
+        case "$2" in prev) act=previous ;; next) act=next ;; *) act=play-pause ;; esac
+        for p in $(playerctl -l 2>/dev/null); do
+            [ "$(playerctl -p "$p" status 2>/dev/null)" = "Playing" ] && { playerctl -p "$p" "$act"; exit 0; }
+        done
+        a=$(active)
+        if [ -n "$a" ]; then playerctl -p "$a" "$act"; else playerctl "$act"; fi ;;
+    next)    pc next ;;
+    prev)    pc previous ;;
+    save)    # посилання на трек, що грає в mpv (з пошуку); kew грає вже скачане
+        link=$(playerctl -p mpv metadata xesam:url 2>/dev/null)
+        if [ -z "$link" ]; then
+            notify-send -a "Музика" "Нічого скачувати" "Скачати можна трек, що грає з пошуку YouTube Music"
+        else
+            setsid -f "$HOME/.local/bin/music-find" --save "$link" >/dev/null 2>&1
+        fi ;;
+    quit)    # зупинити фоновий плеєр пошуку (mpv, music-find) і закрити панель
+        python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.send(b"{\"command\":[\"quit\"]}\n")' \
+            "${XDG_RUNTIME_DIR:-/tmp}/music-mpv.sock" 2>/dev/null
+        hyprctl eval 'MusicQuit()' >/dev/null ;;
+    repeat)  # перемкнути й показати плашку (swayosd), щоб було видно, що спрацювало і для якого плеєра
+        a=$(active)
+        if [ -z "$a" ]; then
+            swayosd-client --custom-message "Повтор: немає плеєра" --custom-icon media-playlist-repeat >/dev/null 2>&1
+            exit 0
+        fi
+        case "$a" in kew*) who="бібліотека" ;; *) who="YouTube" ;; esac
+        # Два стани: «повтор треку» ↔ «весь список по колу» (список по колу — звичайний стан, див. kewrc і music-find)
+        if [ "$(playerctl -p "$a" loop 2>/dev/null)" = "Track" ]; then
+            playerctl -p "$a" loop Playlist
+            swayosd-client --custom-message "Список по колу · $who" --custom-icon media-playlist-repeat >/dev/null 2>&1
+        else
+            playerctl -p "$a" loop Track
+            swayosd-client --custom-message "Повтор треку · $who" --custom-icon media-playlist-repeat-song >/dev/null 2>&1
+        fi ;;
+
+    # ───── для waybar ─────
+    src)            # src yt|lib — кнопка вибору плеєра; підсвічена, коли він головний (оновлення: signal 10)
+        a=$(active)
+        if [ "$2" = lib ]; then icon='\udb80\udf33' name="Бібліотека (локальні файли, kew)"
+        else                    icon='\udb81\uddc3' name="YouTube Music (пошук)"; fi
+        cls=""
+        [ -n "$a" ] && [ "$(kind_of "$a")" = "$2" ] && cls="active"
+        [ -z "$(player_of "$2")" ] && { cls="off"; name="$name — ще не запущено, клік відкриє"; }
+        json "$icon" "Слухати: $name" "$cls" ;;
+    watch-play)     # 󰐊 / 󰏤 — стан відтворення
+        # будь-яка зміна будь-якого плеєра → перерахувати стан активного
+        { echo; playerctl -a -F status 2>/dev/null; } | while read -r _; do
+            case "$(pc status 2>/dev/null)" in
+                Playing) json "󰏤" "Грає — пауза (SUPER+Shift+P)" "playing" ;;
+                Paused)  json "󰐊" "На паузі — грати (SUPER+Shift+P)" "paused" ;;
+                *)       json "󰐊" "Нічого не грає (SUPER+Shift+P)" "idle" ;;
+            esac
+        done ;;
+    watch-repeat)   # 󰑘 підсвічена — повтор одного треку увімкнено
+        # зміна повтору або статусу (інший плеєр став активним) → перерахувати
+        { echo; playerctl -a -F loop 2>/dev/null & playerctl -a -F status 2>/dev/null; } | while read -r _; do
+            if [ "$(pc loop 2>/dev/null)" = "Track" ]; then
+                json "󰑘" "Повтор треку: увімкнено (SUPER+Shift+L)" "active"
+            else
+                json "󰑖" "Список по колу (SUPER+Shift+L — повтор треку)" ""
+            fi
+        done ;;
+    count)          # кількість скачаних треків у бібліотеці
+        n=$(find "$MUSIC" -type f \( -iname '*.opus' -o -iname '*.m4a' -o -iname '*.mp3' -o -iname '*.flac' \
+              -o -iname '*.ogg' -o -iname '*.webm' -o -iname '*.wav' \) 2>/dev/null | wc -l)
+        json "󰝚\\n<small>$n</small>" "Скачано треків: $n — відкрити бібліотеку" "" ;;
+    *)
+        echo "використання: music-ctl search|library|play|use yt|lib|media play|next|prev|src yt|lib|next|prev|repeat|save|quit|watch-play|watch-repeat|count" >&2
+        exit 2 ;;
+esac

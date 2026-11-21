@@ -1,0 +1,106 @@
+// ╭──────────────────────────────────────────────────────────────╮
+// │  WAYBAR-COMMS — меню правої панелі «Зв'язок»                 │
+// │  Стоїть зліва від висунутого вікна. Окремий процес waybar    │
+// │  (~/.local/bin/waybar-comms → waybar); запускає й показує /  │
+// │  ховає його hypr/comms.lua. Після змін цього файлу:          │
+// │  pkill -x waybar-comms; hyprctl reload                       │
+// │  Видно лише коли відкрита панель (SUPER+M).                  │
+// ╰──────────────────────────────────────────────────────────────╯
+{
+    "layer": "top",
+    "position": "right",         // вертикальна смуга
+    "width": 210,                // ширина (= MENU_W у hypr/comms.lua)
+    "margin-top": 8,             // відступи = gaps_out у Hyprland
+    "margin-bottom": 8,
+    "margin-right": 768,         // зліва від вікна панелі: PANEL_W (760) + GAP (8) у hypr/comms.lua
+    "spacing": 0,
+    "mode": "island",            // поверх вікон і клікабельна (як основна панель)
+    "modes": {
+        "island": {
+            "layer": "overlay",
+            "exclusive": false,  // не стискати вікна
+            "passthrough": false,// приймати кліки
+            "visible": true
+        }
+    },
+    "exclusive": false,
+    "passthrough": false,
+    "start_hidden": true,        // стартувати схованою
+    "on-sigusr1": "show",        // SIGUSR1 → показати
+    "on-sigusr2": "hide",        // SIGUSR2 → сховати
+    "reload_style_on_change": true,
+
+    // Одна картка на всю висоту: заголовок і програми зверху, кнопка «+» внизу
+    "modules-left":  ["custom/comms-title", "custom/comms-nchat", "custom/comms-mail", "custom/comms-discord"],
+    "modules-right": ["custom/comms-addtitle", "group/comms-add"],
+
+    // Заголовок картки
+    "custom/comms-title": {
+        "format": "Зв'язок",
+        "tooltip": false
+    },
+
+    // ───────────── ПРОГРАМИ ─────────────
+    // Іконка + назва. Пункт підсвічується, коли програма відкрита (стан пише comms.lua).
+    // "interval": "once" — жодного опитування, оновлення лише сигналом 8 (= SIGNAL у comms.lua).
+    // Новий пункт: скопіюй блок, зміни id / іконку / назву; додай програму в APPS у comms.lua
+    // і гілку в hypr/comms-launch.sh.
+    // Telegram у терміналі (усі акаунти в одному списку)
+    "custom/comms-nchat": {
+        "exec": "~/.config/waybar/scripts/comms-item.sh nchat '\\uf2c6' 'Telegram'",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 8,
+        "align": 0,                  // текст притиснутий ліворуч (ширина пункту — на всю картку)
+        "on-click": "hyprctl eval 'CommsShow(\"nchat\")'"
+    },
+    // Gmail + ukr.net (aerc)
+    "custom/comms-mail": {
+        "exec": "~/.config/waybar/scripts/comms-item.sh mail '\\udb80\\uddee' 'Пошта'",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 8,
+        "align": 0,                  // текст притиснутий ліворуч (ширина пункту — на всю картку)
+        "on-click": "hyprctl eval 'CommsShow(\"mail\")'"
+    },
+    // Discord у терміналі (endcord)
+    "custom/comms-discord": {
+        "exec": "~/.config/waybar/scripts/comms-item.sh discord '\\udb81\\ude6f' 'Discord'",
+        "return-type": "json",
+        "interval": "once",
+        "signal": 8,
+        "align": 0,                  // текст притиснутий ліворуч (ширина пункту — на всю картку)
+        "on-click": "hyprctl eval 'CommsShow(\"discord\")'"
+    },
+
+    // ───────────── ДОДАТИ АКАУНТ (низ картки) ─────────────
+    // Підпис і рядок круглих кнопок: Telegram / пошта / Discord.
+    // Кожна закриває свою програму й відкриває в тому самому вікні додавання акаунта
+    // (CommsAddAccount у hypr/comms.lua → comms-run.sh програми).
+    "custom/comms-addtitle": {
+        "format": "Додати акаунт",
+        "tooltip": false
+    },
+    "group/comms-add": {
+        "orientation": "horizontal",
+        "modules": ["custom/comms-add-nchat", "custom/comms-add-mail", "custom/comms-add-discord"]
+    },
+    "custom/comms-add-nchat": {
+        "format": "\uf2c6",
+        "align": 0.5,
+        "tooltip-format": "Telegram / WhatsApp — ще один номер у nchat",
+        "on-click": "hyprctl eval 'CommsAddAccount(\"nchat\")'"
+    },
+    "custom/comms-add-mail": {
+        "format": "\udb80\uddee",
+        "align": 0.5,
+        "tooltip-format": "Пошта — ще одна скринька (Gmail, ukr.net чи інша)",
+        "on-click": "hyprctl eval 'CommsAddAccount(\"mail\")'"
+    },
+    "custom/comms-add-discord": {
+        "format": "\udb81\ude6f",
+        "align": 0.5,
+        "tooltip-format": "Discord — додати або вибрати юзера",
+        "on-click": "hyprctl eval 'CommsAddAccount(\"discord\")'"
+    }
+}

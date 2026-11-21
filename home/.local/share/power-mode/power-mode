@@ -1,0 +1,56 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  power-mode — перемикач живлення (запуск через sudo без      │
+# │  пароля, див. /etc/sudoers.d/power-mode).                    │
+# │    power-mode eco   — тихо й холодно: CPU 10 Вт (ривки 20),  │
+# │                       GPU 900 МГц                            │
+# │    power-mode boost — сильний буст (як для Mario Kart):      │
+# │                       CPU 30 Вт, GPU на максимум, thermald   │
+# │                       зупинено, щоб не зрізав ліміт          │
+# ╰──────────────────────────────────────────────────────────────╯
+set -eu
+
+# Ліміт тривалої потужності (PL1) в обох інтерфейсах RAPL; справжній — MMIO
+set_pl1() {
+    for d in /sys/class/powercap/intel-rapl-mmio:0 /sys/class/powercap/intel-rapl:0; do
+        [ -w "$d/constraint_0_power_limit_uw" ] && echo "$1" > "$d/constraint_0_power_limit_uw"
+    done
+}
+
+# Ліміт коротких ривків (PL2): в економі 20 Вт замість 39 Вт від прошивки — без стрибків споживання
+set_pl2() {
+    for d in /sys/class/powercap/intel-rapl-mmio:0 /sys/class/powercap/intel-rapl:0; do
+        [ -w "$d/constraint_1_power_limit_uw" ] && echo "$1" > "$d/constraint_1_power_limit_uw"
+    done
+}
+
+# Частота Iris Xe: при підвищенні спершу max, потім boost; при зниженні — навпаки
+set_gpu() {
+    for c in /sys/class/drm/card*; do
+        [ -e "$c/gt_max_freq_mhz" ] || continue
+        if [ "$1" = max ]; then
+            v=$(cat "$c/gt_RP0_freq_mhz")           # апаратний максимум (1200 МГц)
+            echo "$v" > "$c/gt_max_freq_mhz"; echo "$v" > "$c/gt_boost_freq_mhz"
+        else
+            echo "$1" > "$c/gt_boost_freq_mhz"; echo "$1" > "$c/gt_max_freq_mhz"
+        fi
+    done
+}
+
+case "${1:-}" in
+    boost)
+        systemctl stop thermald 2>/dev/null || true   # adaptive-режим сам переписує PL1
+        set_pl2 39000000                              # ривки — як у прошивці, 39 Вт
+        set_pl1 30000000                              # 30 Вт
+        set_gpu max
+        ;;
+    eco)
+        systemctl start thermald 2>/dev/null || true  # захист від перегріву назад
+        sleep 2                                       # thermald при старті ставить свій PL1 — перебиваємо після
+        set_pl1 10000000                              # 10 Вт
+        set_pl2 20000000                              # ривки до 20 Вт
+        set_gpu 900
+        ;;
+    *) echo "використання: power-mode eco|boost" >&2; exit 1 ;;
+esac
+echo "PL1: $(( $(cat /sys/class/powercap/intel-rapl-mmio:0/constraint_0_power_limit_uw) / 1000000 )) Вт"

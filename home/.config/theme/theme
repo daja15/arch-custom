@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# ╭──────────────────────────────────────────────────────────────╮
+# │  THEME — перемикач тем на ходу (SUPER+Shift+T)               │
+# │                                                              │
+# │  theme              — меню з мініатюрами кольорів (rofi)     │
+# │  theme НАЗВА        — увімкнути тему (themes/НАЗВА.conf)     │
+# │  theme toggle       — темна ↔ світла (SUPER+Ctrl+T)          │
+# │  theme list         — список тем                             │
+# │                                                              │
+# │  Теми: ~/.config/theme/themes/*.conf — скопіюй будь-яку,     │
+# │  зміни кольори й назву в [meta] — і вона з'явиться в меню.   │
+# │  Активна тема = посилання ~/.config/theme/theme.conf.        │
+# │  Шпалери: [meta] wallpaper; змінені через wallpaper —        │
+# │  запам'ятовуються для кожної теми окремо.                    │
+# │  Застосовує ~/.config/theme/apply (усі програми одразу;      │
+# │  Telegram, пошта й micro — після перезапуску).               │
+# ╰──────────────────────────────────────────────────────────────╯
+
+DIR="$HOME/.config/theme"
+THEMES="$DIR/themes"
+CACHE="$HOME/.cache/theme"
+mkdir -p "$CACHE"
+
+note() { notify-send -a "Тема" "$@" 2>/dev/null; }
+
+# Значення з теми: get ФАЙЛ розділ ключ  (коментар — « #» після пробілу)
+get() {
+    awk -v sec="[$2]" -v key="$3" '
+        /^\[/ { in_sec = ($0 == sec); next }
+        in_sec {
+            line = $0; sub(/[ \t]+#[ \t].*$/, "", line)
+            n = index(line, "="); if (!n) next
+            k = substr(line, 1, n - 1); gsub(/[ \t]/, "", k)
+            if (k == key) { v = substr(line, n + 1); gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit }
+        }' "$1"
+}
+
+current() { basename "$(readlink "$DIR/theme.conf")" .conf; }
+names()   { for f in "$THEMES"/*.conf; do basename "$f" .conf; done; }
+
+# Мініатюра: смуги фону, тексту й акцентів (робиться раз; оновлюється, якщо тему змінено)
+swatch() {
+    local f="$THEMES/$1.conf" png="$CACHE/$1.png" k inputs=() n=0
+    if [ ! -s "$png" ] || [ "$f" -nt "$png" ]; then
+        for k in bg surface overlay text accent accent2 red yellow green; do
+            inputs+=(-f lavfi -i "color=c=0x$(get "$f" colors $k | tr -d '#'):s=16x96")
+            n=$((n + 1))
+        done
+        ffmpeg -loglevel error -y "${inputs[@]}" -filter_complex "hstack=inputs=$n" -frames:v 1 "$png"
+    fi
+    printf '%s' "$png"
+}
+
+switch() {
+    local name="$1" f="$THEMES/$1.conf"
+    [ -f "$f" ] || { echo "Немає теми: $name (є: $(names | tr '\n' ' '))" >&2; note "Немає теми" "$name"; exit 1; }
+    # Запам'ятати шпалери теми, з якої йдемо (якщо їх змінили через wallpaper — повернуться саме вони)
+    [ "$name" != "$(current)" ] && cp -f "$HOME/.cache/wallpaper/current" "$CACHE/wall-$(current)" 2>/dev/null
+    ln -sfn "themes/$name.conf" "$DIR/theme.conf"
+    printf '%s\n' "$name" > "$CACHE/last-$(get "$f" meta mode)"     # остання темна / світла — для toggle
+    # Шпалери: ті, що були в цієї теми минулого разу, інакше — з [meta] wallpaper
+    local wall
+    wall=$(cat "$CACHE/wall-$name" 2>/dev/null)
+    [ -f "$wall" ] || wall=$(get "$f" meta wallpaper); wall="${wall/#\~/$HOME}"
+    [ -n "$wall" ] && [ -f "$wall" ] && "$HOME/.config/rofi/scripts/wallpaper.sh" "$wall"
+    "$DIR/apply" >/dev/null 2>&1
+    note "Тема: $(get "$f" meta name)" "Telegram, пошта й micro оновляться після перезапуску"
+}
+
+# Темна ↔ світла: остання використана тема протилежного типу, інакше перша така
+toggle() {
+    local mode want name
+    mode=$(get "$THEMES/$(current).conf" meta mode)
+    [ "$mode" = light ] && want=dark || want=light
+    name=$(cat "$CACHE/last-$want" 2>/dev/null)
+    if [ -z "$name" ] || [ ! -f "$THEMES/$name.conf" ]; then
+        name=""
+        for n in $(names); do [ "$(get "$THEMES/$n.conf" meta mode)" = "$want" ] && { name=$n; break; }; done
+    fi
+    [ -n "$name" ] || { note "Немає $want-теми" "Додай її в $THEMES"; exit 1; }
+    switch "$name"
+}
+
+menu() {
+    mapfile -t all < <(names)
+    local cur sel=0 i
+    cur=$(current)
+    for i in "${!all[@]}"; do [ "${all[$i]}" = "$cur" ] && sel=$i; done
+    rows() {   # «назва\0icon\x1fмініатюра» — нульовий байт друкуємо одразу в rofi
+        local n label mode
+        for n in "${all[@]}"; do
+            label=$(get "$THEMES/$n.conf" meta name); mode=$(get "$THEMES/$n.conf" meta mode)
+            [ "$mode" = light ] && label="$label  · світла" || label="$label  · темна"
+            [ "$n" = "$cur" ] && label="● $label"
+            printf '%s\0icon\x1f%s\n' "$label" "$(swatch "$n")"
+        done
+    }
+    local idx code
+    idx=$(rows | rofi -dmenu -i -format i -selected-row "$sel" -show-icons \
+        -p "󰏘  Тема" \
+        -mesg "Enter — увімкнути · Alt+E — редагувати тему · Alt+O — тека тем" \
+        -kb-custom-1 "Alt+e" -kb-custom-2 "Alt+o" \
+        -theme-str 'window { width: 520px; }' \
+        -theme-str 'listview { lines: 6; fixed-height: false; }' \
+        -theme-str 'element-icon { size: 48px; }' \
+        -theme-str 'mode-switcher { enabled: false; }' \
+        -theme-str 'entry { placeholder: "Пошук теми…"; }')
+    code=$?
+    [ -n "$idx" ] || [ $code -eq 11 ] || return
+    case $code in
+        0)  [ "${all[$idx]}" != "$cur" ] && switch "${all[$idx]}" ;;
+        10) kitty --single-instance --instance-group=term micro "$THEMES/${all[$idx]}.conf" & ;;
+        11) xdg-open "$THEMES" & ;;
+    esac
+}
+
+case "${1:-}" in
+    ""|menu)   menu ;;
+    toggle)    toggle ;;
+    list)      cur=$(current); for n in $(names); do
+                   printf '%s %-14s %s (%s)\n' "$([ "$n" = "$cur" ] && echo '●' || echo ' ')" "$n" \
+                       "$(get "$THEMES/$n.conf" meta name)" "$(get "$THEMES/$n.conf" meta mode)"; done ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# //' ;;
+    *)         switch "$1" ;;
+esac

@@ -1,0 +1,57 @@
+# Maintainer: dmadisetti <madisetti at pm dot me>
+# Previous-maintainer: TabulateJarl8 <tabulatejarl8 at gmail dot com>
+
+pkgname=steam-tui
+pkgver=0.3.0b
+pkgrel=8
+pkgdesc="Rust TUI client for steamcmd"
+arch=('x86_64')
+url="https://github.com/dmadisetti/steam-tui"
+license=('MIT')
+depends=('steamcmd' 'openssl-3')
+makedepends=('cargo' 'git')
+optdepends=('wine: Launch Windows games')
+_commit=f5d2a4f75ade23f21da18051a5469f2a084ec300
+# ВИПРАВЛЕННЯ (локальне, 2026-11-16): програма зафіксована на старому openssl-sys 0.9.74,
+# який знає лише OpenSSL до 3.0, а в Arch уже OpenSSL 4 — збирання падало з panic
+# «This crate is only compatible with OpenSSL ... 3.0.0». Збираємо проти сумісного
+# пакета openssl-3 (/usr/lib/openssl-3, /usr/include/openssl-3).
+export OPENSSL_LIB_DIR=/usr/lib/openssl-3
+export OPENSSL_INCLUDE_DIR=/usr/include/openssl-3
+
+# ВИПРАВЛЕННЯ 2 (локальне, 2026-11-16): steamcmd-sync.patch — бібліотека була порожня.
+#  • steam-tui різав вивід steamcmd за кольоровими кодами й рахував шматки; новий steamcmd
+#    виводить інакше → відповіді зсувались, акаунт не читався, ігри не завантажувались.
+#    Тепер після кожної команди читається все до запрошення «Steam>».
+#  • записи без розділів extended/config (DLC, інсталятори) більше не відкидаються;
+#  • пакет 0 (службові програми Steam) пропускається — перше завантаження швидше;
+#  • одна гра з кількох пакетів — один рядок;
+#  • немає клієнта Steam — пробіл більше не валить програму (panic client.rs:88).
+source=("git+https://github.com/dmadisetti/steam-tui#commit=$_commit"
+        "steamcmd-sync.patch")
+sha512sums=('SKIP'
+            'SKIP')
+
+prepare() {
+	cd "$pkgname"
+	patch -Np1 -i "$srcdir/steamcmd-sync.patch"
+}
+
+build() {
+
+	cd "$pkgname"
+	RUSTUP_TOOLCHAIN=stable cargo build --release --locked --all-features --target-dir="./"
+
+}
+
+check() {
+	cd "$pkgname"
+	# тести *_impure запускають справжній steamcmd і падають через його вивід — пропускаємо
+	RUSTUP_TOOLCHAIN=stable cargo test --release --locked --target-dir="./" -- --skip _impure
+}
+
+package() {
+	cd "$pkgname"
+	install -Dm 755 ./release/${pkgname} -t "${pkgdir}/usr/bin"
+	install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/steam-tui" || true # since release 0.1.0 doesnt have a LICENSE file
+}

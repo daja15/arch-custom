@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+# ╭──────────────────────────────────────────────────────────────╮
+# │  FAST-FONT-BUILD — шрифт для легшого читання («bionic»)      │
+# │  Бере JetBrains Mono Nerd Font і робить «JetBrainsMono Fast»: │
+# │    Початок слова жирніший, далі товщина ПЛАВНО спадає до     │
+# │    звичайної (див. RAMP нижче). Проміжні товщини (650, 450…) │
+# │    інтерполюються між Regular/Medium/SemiBold/Bold.          │
+# │    Решта літер — звичайні: погляд «чіпляється» за початок.   │
+# │  Латиниця, КИРИЛИЦЯ (укр.), грецька. Лігатури коду (-> => !=) │
+# │  та іконки Nerd Font лишаються: нові правила ДОДАЮТЬСЯ до    │
+# │  наявних (feaLib їх замінив би — тому зливаємо вручну).      │
+# │  Ширина жирних літер та сама (моноширинний) — текст не їде.  │
+# │  Результат: ~/.local/share/fonts/JetBrainsMonoFast-Regular.ttf│
+# │  Потрібно: python-fonttools, ttf-jetbrains-mono-nerd         │
+# ╰──────────────────────────────────────────────────────────────╯
+import copy
+import os
+import subprocess
+import sys
+import unicodedata
+
+from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
+
+SRC = "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-{}.ttf"
+OUT_DIR = os.path.expanduser("~/.local/share/fonts")
+OUT = os.path.join(OUT_DIR, "JetBrainsMonoFast-Regular.ttf")
+FAMILY = "JetBrainsMono Fast"
+
+# ─── ПЛАВНІСТЬ ───────────────────────────────────────────────────
+# RAMP: (товщина, мінімальна довжина слова) для 1-ї, 2-ї, 3-ї… літери.
+#   Товщина: 400 = Regular, 500 = Medium, 600 = SemiBold, 700 = Bold.
+#   Будь-яке число між ними — інтерполяція (напр. 650, 450).
+#   Довжина: n-та літера тоншає лише якщо слово має ≥ стільки літер
+#   (коротке слово не стає жирним цілком).
+# Було: 700 / 600 / 500 → різкий стрибок до 400.
+RAMP = [
+    (660, 1),   # 1-ша літера — будь-яке слово
+    (580, 3),   # 2-га — слово ≥ 3 літер
+    (510, 5),   # 3-тя — слово ≥ 5
+    (450, 7),   # 4-та — слово ≥ 7, далі звичайні 400
+]
+MASTERS = {400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold"}
+
+
+def letters(font):
+    """Гліфи літер (латиниця, кирилиця, грецька…), що є в cmap."""
+    names = set()
+    for cp, name in font.getBestCmap().items():
+        if unicodedata.category(chr(cp)).startswith("L") and cp < 0x2000:
+            names.add(name)
+    return sorted(names)
+
+
+_sets = {}
+
+
+def glyphset(w):
+    if w not in _sets:
+        _sets[w] = TTFont(SRC.format(MASTERS[w])).getGlyphSet()
+    return _sets[w]
+
+
+def record(w, n):
+    rec = DecomposingRecordingPen(glyphset(w))   # складені гліфи (й, ї …) → звичайні контури
+    glyphset(w)[n].draw(rec)
+    return rec.value
+
+
+def glyph_at(n, w):
+    """Запис контуру літери n товщини w: майстер або інтерполяція між двома сусідніми."""
+    if w in MASTERS:
+        return record(w, n)
+    lo = max(m for m in MASTERS if m < w)
+    hi = min(m for m in MASTERS if m > w)
+    a, b = record(lo, n), record(hi, n)
+    same = len(a) == len(b) and all(
+        oa == ob and len(pa) == len(pb) and all((p is None) == (q is None) for p, q in zip(pa, pb))
+        for (oa, pa), (ob, pb) in zip(a, b))
+    if not same:                                  # несумісні контури — найближчий майстер
+        return a if w - lo <= hi - w else b
+    t = (w - lo) / (hi - lo)
+    lerp = lambda p, q: None if p is None else (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+    return [(op, tuple(lerp(p, q) for p, q in zip(pa, pb))) for (op, pa), (_, pb) in zip(a, b)]
+
+
+def copy_glyphs(dst, names, weight, suffix):
+    """Додати в dst гліфи names товщини weight під назвами name.suffix."""
+    order = dst.getGlyphOrder()
+    mixed = 0
+    for n in names:
+        rec = glyph_at(n, weight)
+        pen = TTGlyphPen(None)
+        for op, args in rec:
+            getattr(pen, op)(*args)
+        g = pen.glyph()
+        new = f"{n}.{suffix}"
+        dst["glyf"][new] = g                 # glyf сам додає назву в порядок гліфів
+        g.recalcBounds(dst["glyf"])
+        adv = dst["hmtx"][n][0]              # моноширинний: ширина як у Regular
+        dst["hmtx"][new] = (adv, getattr(g, "xMin", 0))
+    dst.setGlyphOrder(order)
+
+
+def merge_gsub(base, extra):
+    """Додати lookups і функцію calt з extra.GSUB у base.GSUB, не чіпаючи наявних."""
+    bt, et = base["GSUB"].table, extra["GSUB"].table
+    off = len(bt.LookupList.Lookup)
+    for lk in et.LookupList.Lookup:           # посилання всередині контекстних правил — зсунути
+        for st in lk.SubTable:
+            for rs in getattr(st, "ChainSubRuleSet", []) or []:
+                for r in rs.ChainSubRule:
+                    for rec in r.SubstLookupRecord:
+                        rec.LookupListIndex += off
+            for rs in getattr(st, "ChainSubClassSet", []) or []:
+                if rs:
+                    for r in rs.ChainSubClassRule:
+                        for rec in r.SubstLookupRecord:
+                            rec.LookupListIndex += off
+            for rec in getattr(st, "SubstLookupRecord", []) or []:
+                rec.LookupListIndex += off
+        bt.LookupList.Lookup.append(lk)
+    bt.LookupList.LookupCount = len(bt.LookupList.Lookup)
+
+    # Правила calt з extra → дописати в КІНЕЦЬ наявної функції calt шрифту.
+    # (Друга функція з тим самим тегом не працює: HarfBuzz бере лише першу calt у мові.)
+    ours = []
+    for fr in et.FeatureList.FeatureRecord:
+        if fr.FeatureTag == "calt":
+            ours += [i + off for i in fr.Feature.LookupListIndex]
+    calts = [fr for fr in bt.FeatureList.FeatureRecord if fr.FeatureTag == "calt"]
+    if calts:
+        for fr in calts:
+            fr.Feature.LookupListIndex = list(fr.Feature.LookupListIndex) + ours
+            fr.Feature.LookupCount = len(fr.Feature.LookupListIndex)
+    else:                                   # у шрифті немає calt — додати нову й увімкнути для всіх мов
+        from fontTools.ttLib.tables import otTables as ot
+        fr = ot.FeatureRecord()
+        fr.FeatureTag = "calt"
+        fr.Feature = ot.Feature()
+        fr.Feature.FeatureParams = None
+        fr.Feature.LookupListIndex = ours
+        fr.Feature.LookupCount = len(ours)
+        bt.FeatureList.FeatureRecord.append(fr)
+        bt.FeatureList.FeatureRecord.sort(key=lambda r: r.FeatureTag)   # список має бути впорядкований
+        idx = bt.FeatureList.FeatureRecord.index(fr)
+        bt.FeatureList.FeatureCount = len(bt.FeatureList.FeatureRecord)
+        for sr in bt.ScriptList.ScriptRecord:
+            for ls in [sr.Script.DefaultLangSys] + [r.LangSys for r in sr.Script.LangSysRecord]:
+                if ls is not None:
+                    ls.FeatureIndex = [i + (1 if i >= idx else 0) for i in ls.FeatureIndex] + [idx]
+                    ls.FeatureCount = len(ls.FeatureIndex)
+    print(f"calt: додано {len(ours)} правила до {len(calts) or 1} функції(й)")
+
+
+def rename(font):
+    name = font["name"]
+    for rec in list(name.names):
+        if rec.nameID in (1, 3, 4, 6, 16, 17, 21, 22):
+            name.removeNames(nameID=rec.nameID)
+    name.setName(FAMILY, 1, 3, 1, 0x409)
+    name.setName("Regular", 2, 3, 1, 0x409)
+    name.setName(f"{FAMILY} Regular", 3, 3, 1, 0x409)
+    name.setName(f"{FAMILY} Regular", 4, 3, 1, 0x409)
+    name.setName("JetBrainsMonoFast-Regular", 6, 3, 1, 0x409)
+
+
+def main():
+    base = TTFont(SRC.format("Regular"))
+    L = letters(base)
+    print(f"Літер: {len(L)}")
+    for i, (weight, _) in enumerate(RAMP, 1):
+        copy_glyphs(base, L, weight, f"f{i}")
+        print(f"  {i}-а літера: товщина {weight}")
+
+    cls = lambda s: " ".join(f"{n}.{s}" for n in L) if s else " ".join(L)
+    tiers = range(1, len(RAMP) + 1)
+    fea = f"@L = [{cls('')}];\n"
+    fea += "".join(f"@L{i} = [{cls(f'f{i}')}];\n" for i in tiers)
+    fea += "@ALL = [@L " + " ".join(f"@L{i}" for i in tiers) + "];\n"
+    fea += "".join(f"lookup W{i} {{ sub @L by @L{i}; }} W{i};\n" for i in tiers)
+    fea += "feature calt {\n"
+    fea += "  lookup FAST1 { ignore sub @ALL @L'; sub @L' lookup W1; } FAST1;\n"   # початок слова
+    for i in tiers:
+        if i == 1:
+            continue
+        before = " ".join(f"@L{j}" for j in range(1, i))         # попередні літери вже потоншені
+        after = " @L" * max(0, RAMP[i - 1][1] - i)                # слово ще має стільки літер
+        fea += f"  lookup FAST{i} {{ sub {before} @L' lookup W{i}{after}; }} FAST{i};\n"
+    fea += "} calt;\n"
+    # Зібрати правила в копії шрифту, потім злити з наявними (зберегти лігатури коду)
+    tmp = copy.deepcopy(base)
+    addOpenTypeFeaturesFromString(tmp, fea)
+    merge_gsub(base, tmp)
+    rename(base)
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    # Атомарно: новий файл поруч, потім rename. Запис ПОВЕРХ відкритого шрифту
+    # ламає програми, що його вже тримають (Hyprland падав у harfbuzz → safe mode).
+    tmp_out = OUT + ".new"
+    base.save(tmp_out)
+    os.replace(tmp_out, OUT)
+    subprocess.run(["fc-cache", "-f", OUT_DIR], check=False)
+    print(f"Готово: {OUT}  (шрифт «{FAMILY}»)")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

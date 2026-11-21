@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/all;
+Actions=compress;
+X-KDE-Submenu=
+X-KDE-Priority=TopLevel
+
+[Desktop Action compress]
+Name=Стиснути в архів…
+Icon=package-x-generic
+Exec=/home/jijau/.local/bin/arc compress %F

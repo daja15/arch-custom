@@ -1,0 +1,11 @@
+# Текстовий редактор micro у терміналі kitty — для відкриття текстових файлів
+# (стандартний micro.desktop потребує «терміналу за замовчуванням», якого в Hyprland немає)
+[Desktop Entry]
+Type=Application
+Name=micro (kitty)
+Comment=Відкрити файл у micro
+Exec=kitty --class micro -e micro %F
+Icon=accessories-text-editor
+Terminal=false
+NoDisplay=true
+Categories=Utility;TextEditor;

@@ -1,0 +1,2 @@
+# Перемикач живлення eco/boost без пароля (waybar / rofi)
+jijau ALL=(root) NOPASSWD: /usr/local/bin/power-mode eco, /usr/local/bin/power-mode boost

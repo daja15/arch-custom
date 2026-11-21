@@ -1,0 +1,198 @@
+# ╭──────────────────────────────────────────────────────────────╮
+# │  MICRO — підсвічування Markdown (замість вбудованого)        │
+# │  Кольори — у colorschemes/tykha-nich.micro (групи *.md*).    │
+# │  У блоках ```мова … ``` підсвічується сама мова.             │
+# │  Пізніші правила мають пріоритет над ранішими.               │
+# ╰──────────────────────────────────────────────────────────────╯
+filetype: markdown
+
+detect:
+    filename: "\\.(livemd|md|mkd|mkdn|markdown)$"
+
+rules:
+    # Таблиці: лише роздільники | і рядок-лінійка
+    - symbol.table: "\\|"
+    - symbol.table: "^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$"
+    # Цитати
+    - statement.quote: "^\\s*>.*"
+    # Курсив, жирний, жирний курсив, закреслений
+    - type.italic: "(^|[^*_\\w])(\\*[^*\\s][^*]*\\*|_[^_\\s][^_]*_)"
+    - type.bold: "(\\*\\*[^*\\s][^*]*\\*\\*|__[^_\\s][^_]*__)"
+    - type.bolditalic: "(\\*\\*\\*[^*\\s][^*]*\\*\\*\\*)"
+    - type.strike: "~~[^~\\s][^~]*~~"
+    # Горизонтальна лінія
+    - symbol.hr: "^\\s*(---+|\\*\\*\\*+|___+)\\s*$"
+    # Списки: маркер і номер
+    - identifier.list: "^\\s*([*+-]|[0-9]+[.)])\\s"
+    # Чекбокси
+    - identifier.todo: "^\\s*[*+-]\\s\\[ \\]"
+    - identifier.done: "^\\s*[*+-]\\s\\[[xX]\\].*"
+    # Посилання: [текст](адреса), картинки, голі URL, <адреси>
+    - constant.linktext: "\\[[^]]+\\]"
+    - underlined.url: "\\]\\([^)]+\\)"
+    - underlined.url: "https?://[^ )>]+"
+    - underlined.url: "<[a-z]+://[^>]+>"
+    - constant.image: "!\\[[^]]*\\]"
+    # Заголовки (рівні 1, 2, 3–6) і підкреслені заголовки
+    - special.h3: "^\\s*#{3,6}\\s.*"
+    - special.h2: "^\\s*##\\s.*"
+    - special.h1: "^\\s*#\\s.*"
+    - special.h1: "^===+\\s*$"
+    - special.h2: "^---+\\s*$"
+    # Коментарі HTML
+    - comment:
+        start: "<!--"
+        end: "-->"
+        rules: []
+    # Блоки коду з мовою (```python тощо) — підсвічується сама мова.
+    # Без limit-group: у micro 2.0.15 він вимикає правила всередині блоку.
+    - special.codebody:
+        start: "^\\s*```(py|python|python3)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "python"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(sh|bash|zsh|shell|console|shellsession)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "shell"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(json|jsonc|json5)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "json"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(ya?ml)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "yaml"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(lua)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "lua"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(toml)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "toml"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(js|javascript|mjs|cjs|jsx)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "javascript"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(ts|typescript|tsx)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "typescript"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(c|h)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "c"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(cpp|c\\+\\+|cc|hpp|cxx)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "c++"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(rs|rust)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "rust"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(go|golang)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "go"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(css|scss)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "css"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(html|xml|svg)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "html"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(sql)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "sql"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(diff|patch)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "patch"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(ini|conf|cfg|desktop)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "ini"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(java)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "java"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(ruby|rb)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "ruby"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(php)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "php"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(make|makefile)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "makefile"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(dockerfile|docker)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "dockerfile"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    - special.codebody:
+        start: "^\\s*```(nix)\\s*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - include: "nix"
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+    # Блок коду без мови / невідома мова
+    - special.codeblock:
+        start: "^\\s*```.*$"
+        end: "^\\s*```\\s*$"
+        rules:
+            - symbol.fence: "^\\s*```.*$"      # рамка ``` — приглушена (останнє правило = пріоритет)
+
+    # Код у рядку: `...`
+    - special.code:
+        start: "`"
+        end: "`"
+        rules: []

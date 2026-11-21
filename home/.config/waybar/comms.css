@@ -1,0 +1,93 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  WAYBAR-COMMS — меню правої панелі «Зв'язок»                 │
+   │  Той самий стиль, що й картки столу (UI-кіт, desk.c):        │
+   │  картка alpha(@bg) з рамкою @line і заокругленням 16;        │
+   │  заголовок = t-title, підпис розділу = t-subtitle;           │
+   │  пункт = рядок списку (ui-row): значок (Nerd Font Mono)      │
+   │  · 12 · назва; кнопки «додати» — кружки 36 px, як язички.    │
+   │  Без transition / тіней — перемальовується лише при зміні.   │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+@import url("../theme/gen/theme.css");   /* кольори й шрифт — з ~/.config/theme/theme.conf */
+
+* {
+    font-size: 10pt;            /* = t-body */
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+    transition: none;
+}
+
+/* Уся смуга — одна картка на всю висоту. Саме вікно прозоре, картка — його внутрішня коробка */
+window#waybar { background: transparent; color: @text; }
+window#waybar > box {
+    background: alpha(@bg, 0.92);
+    border: 1px solid @line;
+    border-radius: 16px;
+}
+window#waybar.hidden { opacity: 0; }
+
+tooltip       { background: @bg; border: 1px solid @line; border-radius: 10px; }
+tooltip label { color: @text; padding: 4px 6px; }
+
+.modules-left  { padding: 16px 0 8px; }             /* поля картки: 16 згори */
+
+/* Заголовок картки (= t-title) */
+#custom-comms-title {
+    font-size: 12pt;
+    font-weight: 700;
+    color: @accent2;
+    padding: 0 16px 12px;
+}
+
+/* Пункт = рядок списку: тло при наведенні, вибраний — акцентне тло */
+#custom-comms-nchat, #custom-comms-mail, #custom-comms-discord {
+    min-width: 176px;           /* 210 − рамки 2 − відступи 2×8 − поля 2×8 */
+    min-height: 28px;
+    color: @text;
+    padding: 6px 8px;
+    margin: 0 8px 2px;
+    border-radius: 8px;
+}
+#custom-comms-nchat:hover, #custom-comms-mail:hover, #custom-comms-discord:hover {
+    background: alpha(@overlay, 0.8);
+}
+#custom-comms-nchat.active, #custom-comms-mail.active, #custom-comms-discord.active {
+    background: @accent-bg;
+    color: @accent;
+}
+
+/* Низ картки: лінія, підпис розділу і кружки «додати» */
+.modules-right {
+    border-top: 1px solid @line;
+    margin: 0 16px;
+    padding: 12px 0 16px;
+}
+#custom-comms-addtitle {        /* = t-subtitle */
+    font-size: 9pt;
+    font-weight: 600;
+    color: @muted;
+    padding: 0 0 8px;
+}
+
+/* Кружки 36 px, як язички на столі; 3 × (36 + 2×6) = 144 */
+#comms-add { margin: 0 16px; }
+#custom-comms-add-nchat, #custom-comms-add-mail, #custom-comms-add-discord {
+    font-family: "JetBrainsMono Nerd Font Mono";    /* значок рівно по центру */
+    font-size: 16pt;
+    min-width: 36px;
+    min-height: 36px;
+    margin: 0 6px;
+    padding: 0;
+    border-radius: 18px;
+    color: @muted;
+    background: alpha(@bg, 0.72);
+    box-shadow: inset 0 0 0 1px @line;
+}
+#custom-comms-add-nchat:hover, #custom-comms-add-mail:hover, #custom-comms-add-discord:hover {
+    background: @accent-bg;
+    color: @accent;
+    box-shadow: inset 0 0 0 1px @accent;
+}

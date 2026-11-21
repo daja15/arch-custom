@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- ШАБЛОН: {назва} — колір з ~/.config/theme/theme.conf; apply генерує gen/pip-buttons.html -->
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Кнопки «Відео поверх вікон»</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: {bg}; color: {text}; font: 16px/1.6 "JetBrainsMono Fast", "JetBrainsMono Nerd Font", sans-serif;
+         max-width: 720px; margin: 48px auto; padding: 0 16px; }
+  h1 { color: {accent2}; font-size: 22px; }
+  .btns { display: flex; gap: 16px; margin: 28px 0; flex-wrap: wrap; }
+  a.btn { display: inline-block; padding: 12px 22px; border-radius: 12px; text-decoration: none; font-weight: bold;
+          background: {accent}; color: {bg}; cursor: grab; }
+  ol li { margin: 6px 0; }
+  .note { color: {muted}; font-size: 14px; }
+  kbd { background: {overlay}; border: 1px solid {line}; border-radius: 6px; padding: 1px 6px; }
+</style>
+</head>
+<body>
+<h1>Кнопки для Firefox: відео поверх вікон</h1>
+<p>Перетягни мишкою кнопку на <b>панель закладок</b> Firefox (вона під адресним рядком;
+якщо її не видно — <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>).</p>
+
+<div class="btns">
+  <a class="btn" title="Перетягни на панель закладок"
+     href="javascript:(()=>{const v=document.querySelector('video');const s=v&&v.currentSrc&&/^https?:/.test(v.currentSrc)?v.currentSrc:location.href;if(v)v.pause();location.href='pip:'+encodeURIComponent(s)})()">▶ Поверх вікон</a>
+</div>
+
+<ol>
+  <li>Відкрий сторінку з відео (YouTube, серіал, аніме).</li>
+  <li>Натисни на панелі закладок <b>▶ Поверх вікон</b> — відео з'явиться в маленькому вікні над усіма програмами.
+      </li>
+  <li>Першого разу Firefox спитає, чим відкрити посилання: вибери <b>«Відео поверх вікон»</b> і познач «Запам'ятати».</li>
+</ol>
+
+<p><b>Керування</b> (клавіші — <kbd>SUPER</kbd>+<kbd>Alt</kbd>+…):<br>
+<kbd>V</kbd> показати / сховати · <kbd>L</kbd> замок (кліки проходять крізь відео) ·
+<kbd>[</kbd> <kbd>]</kbd> прозорість · <kbd>Пробіл</kbd> пауза · <kbd>,</kbd> <kbd>.</kbd> перемотка ·
+<kbd>Q</kbd> закрити · <kbd>O</kbd> відкрити посилання з буфера обміну.<br>
+Мишею: тягнути — перенести, коліщатко — розмір, подвійний клік — пауза.</p>
+
+<p class="note">Відео відкриває yt-dlp — як і плеєр музики. Більшість сайтів працює; якщо якийсь сайт
+ховає відео, кнопка нічого не відкриє — тоді лишається звичайний перегляд у браузері.</p>
+</body>
+</html>

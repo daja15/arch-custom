@@ -1,0 +1,25 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  MUSIC-ACTIVE — хто зараз «головний» плеєр (фонова служба)   │
+# │  Плеєри музичного центру: mpv (вкладка «Пошук», YouTube      │
+# │  Music) і kew (вкладка «Бібліотека», локальні файли).        │
+# │  Щойно один починає грати:                                   │
+# │    • він записується як активний — гарячі клавіші            │
+# │      (music-ctl) керують лише ним;                           │
+# │    • другий ставиться на паузу — вони не грають разом.       │
+# │  Браузер (Firefox) не чіпаємо.                               │
+# │  Запускає hypr/services.sh, працює лише на подіях D-Bus.     │
+# ╰──────────────────────────────────────────────────────────────╯
+STATE="${XDG_RUNTIME_DIR:-/tmp}/music-active"
+
+playerctl -a -F --format '{{playerInstance}} {{status}}' status 2>/dev/null | while read -r name status; do
+    case "$name" in mpv*|kew*) ;; *) continue ;; esac
+    [ "$status" = "Playing" ] || continue
+    echo "$name" > "$STATE"
+    pkill -RTMIN+10 -x waybar-music 2>/dev/null          # кнопки вибору плеєра в смузі музики
+    for other in $(playerctl -l 2>/dev/null); do          # інший плеєр центру → пауза
+        case "$other" in mpv*|kew*) ;; *) continue ;; esac
+        [ "$other" = "$name" ] && continue
+        [ "$(playerctl -p "$other" status 2>/dev/null)" = "Playing" ] && playerctl -p "$other" pause
+    done
+done

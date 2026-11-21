@@ -1,0 +1,11 @@
+[Unit]
+Description=Обмеження потужності CPU: тривала 10 Вт, короткі ривки до 20 Вт (енергоефективність)
+After=thermald.service suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+# constraint_0 — PL1 (тривала), constraint_1 — PL2 (ривки; було 39 Вт від виробника)
+ExecStart=/bin/sh -c 'for z in /sys/class/powercap/intel-rapl-mmio:0 /sys/class/powercap/intel-rapl:0; do echo 10000000 > $z/constraint_0_power_limit_uw; echo 20000000 > $z/constraint_1_power_limit_uw; done'
+
+[Install]
+WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target

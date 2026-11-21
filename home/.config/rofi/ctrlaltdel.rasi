@@ -1,0 +1,99 @@
+/* ╭──────────────────────────────────────────────────────────────╮
+   │  CTRL+ALT+DEL — меню на весь екран: ряд великих іконок       │
+   │  Вимкнути · Перезавантаж. · Гібернація · BIOS · Диспетчер · Блок.  │
+   │  Запуск: ~/.config/rofi/scripts/ctrlaltdel.sh                 │
+   │  Кольори, шрифт, заокруглення — з теми (theme.rasi).         │
+   │  Фон задає скрипт: колір фону теми, трохи прозорий.          │
+   ╰──────────────────────────────────────────────────────────────╯ */
+
+@import "~/.config/rofi/theme.rasi"
+
+* {
+    tile:   150px;    /* ширина однієї плитки */
+    gap:    20px;     /* проміжок між плитками */
+}
+
+window {
+    fullscreen:       true;
+    transparency:     "real";
+    border:           0px;
+    border-radius:    0px;
+    padding:          0px;
+}
+
+/* Усе по центру: порожнє місце зверху й знизу (dummy розтягуються) */
+mainbox {
+    orientation:      vertical;
+    children:         [ dummy, textbox-title, listview, message, dummy ];
+    spacing:          28px;
+    padding:          0px;
+    background-color: transparent;
+}
+dummy { expand: true; background-color: transparent; }
+
+/* Заголовок над плитками */
+textbox-title {
+    expand:            false;
+    str:               "Що зробити?";
+    horizontal-align:  0.5;
+    text-color:        @accent2;
+    font:              "JetBrainsMono Fast Bold 16";
+    background-color:  transparent;
+}
+
+/* Ряд плиток — ширина рівно під 6 штук, по центру */
+listview {
+    columns:          6;
+    lines:            1;
+    fixed-columns:    true;
+    dynamic:          false;
+    scrollbar:        false;
+    expand:           false;
+    spacing:          @gap;
+    width:            1000px;  /* 6 × tile + 5 × gap */
+    margin:           0px calc( 50% - 500px );
+    background-color: transparent;
+    border:           0px;
+}
+
+/* Плитка: іконка над підписом, «острівець» як у waybar */
+element {
+    orientation:      vertical;
+    padding:          26px 0px 20px 0px;
+    border:           1px;
+    border-color:     @line;
+    border-radius:    16px;
+    background-color: @surface;
+    text-color:       @text;
+    cursor:           pointer;
+}
+element normal.normal,
+element alternate.normal { background-color: @surface; text-color: @text; }
+element selected.normal {               /* вибрана плитка — блакитна рамка */
+    background-color: @accent-bg;
+    border-color:     @accent;
+    text-color:       @bright;
+}
+element-icon { enabled: false; }
+element-text {
+    horizontal-align: 0.5;
+    min-height:       96px;    /* іконка + підпис (два рядки) */
+    vertical-align:   0.5;
+    background-color: transparent;
+    text-color:       inherit;
+    cursor:           inherit;
+}
+
+/* Підказка знизу */
+message {
+    expand:           false;
+    border:           0px;
+    padding:          0px;
+    background-color: transparent;
+}
+textbox {
+    horizontal-align: 0.5;
+    text-color:       @muted;
+    background-color: transparent;
+    font:             "JetBrainsMono Fast 10";
+}

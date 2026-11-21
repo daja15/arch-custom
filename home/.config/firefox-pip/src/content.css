@@ -1,0 +1,6 @@
+/* Кнопки на відео. ШАБЛОН: {назва} — колір з ~/.config/theme/theme.conf (підставляє build.sh) */
+.pipx-bar { position: absolute; z-index: 2147483647; display: none; gap: 6px; }
+.pipx-bar.pipx-show { display: flex; }
+.pipx-btn { all: initial; cursor: pointer; padding: 6px 12px; border-radius: 10px; font: bold 13px sans-serif;
+            background: {accent}; color: {bg}; box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
+.pipx-btn:hover { filter: brightness(1.1); }

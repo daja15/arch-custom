@@ -1,0 +1,183 @@
+diff --git a/src/client.rs b/src/client.rs
+index c4892b2..9bcfd46 100644
+--- a/src/client.rs
++++ b/src/client.rs
+@@ -84,8 +84,12 @@ fn execute(
+                                 ])
+                                 .stdout(process::Stdio::null())
+                                 .stderr(process::Stdio::null())
+-                                .spawn()
+-                                .unwrap();
++                                .spawn();
++                            // Steam client not installed — nothing to start (used to panic here).
++                            let mut child = match child {
++                                Ok(child) => child,
++                                Err(_) => return,
++                            };
+ 
+                             // TODO: Currently doesn't kill all grand-children processes.
+                             while let Ok(terminate) = termination.recv() {
+@@ -281,11 +285,10 @@ fn execute(
+                 }
+                 // Execute and handles response to various SteamCmd Commands.
+                 Some(Command::Cli(line)) => {
+-                    cmd.write(&line)?;
+                     let mut updated = 0;
+                     let waiting = queue.len();
+-                    let buf = cmd.maybe_next()?;
+-                    let response = String::from_utf8_lossy(&buf);
++                    let response_text = cmd.run(&line)?;
++                    let response: std::borrow::Cow<str> = std::borrow::Cow::Owned(response_text);
+                     match *INPUT_LEX.tokenize(&line).as_slice() {
+                         ["login", _] => {
+                             let response = response.to_string();
+@@ -361,18 +364,19 @@ fn execute(
+                             // Bug requires additional scan
+                             // do a proper check here in case this is ever fixed.
+                             // A bit of a hack, but will do for now.
+-                            let mut response = response;
+-                            log!(response);
+-                            if response == "[0m" {
+-                                cmd.write("")?;
+-                                cmd.write("")?;
+-                                while !response.starts_with("[0mAppID") {
+-                                    if let Ok(buf) = cmd.maybe_next() {
+-                                        response =
+-                                            String::from_utf8_lossy(&buf).into_owned().into();
+-                                    }
+-                                }
++                            // steamcmd often answers the first app_info_print with nothing
++                            // (data not fetched yet) — ask again a few times.
++                            let mut response: String = response.into_owned();
++                            let mut tries = 0;
++                            while !response.contains("AppID") && tries < 5 {
++                                tries += 1;
++                                thread::sleep(std::time::Duration::from_millis(200));
++                                response = cmd.run(&line)?;
+                             }
++                            log!(response);
++                            // Start parsing at the "AppID : ..." line, like the old chunked reader did.
++                            let start = response.find("AppID").unwrap_or(0);
++                            let response = response[start..].to_string();
+                             let mut lines = response.lines();
+ 
+                             match Game::new(key, &mut lines) {
+@@ -413,7 +417,8 @@ fn execute(
+                         updated += o;
+                         let total = e + (queue.len() - waiting) as i32;
+                         *state = if updated == total {
+-                            games.sort_by(|a, b| a.name.cmp(&b.name));
++                            games.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
++                            games.dedup_by_key(|g| g.id);   // one game can come from several packages
+                             fs::write(cache_location()?, serde_json::to_string(&games)?)?;
+                             games = Vec::new();
+                             State::LoggedIn
+@@ -421,17 +426,7 @@ fn execute(
+                             State::Loaded(updated, total)
+                         }
+                     }
+-                    // Iterate to scrub past Steam> prompt
+-                    let buf = cmd.maybe_next()?;
+-                    let mut prompt = String::from_utf8_lossy(&buf);
+-                    log!(prompt);
+-                    while prompt != "[1m\nSteam>" {
+-                        if let Ok(buf) = cmd.maybe_next() {
+-                            prompt = String::from_utf8_lossy(&buf).into_owned().into();
+-                        } else {
+-                            cmd.write("")?;
+-                        }
+-                    }
++                    // (the "Steam>" prompt was already consumed by cmd.run)
+                 }
+             }
+         }
+@@ -626,13 +621,14 @@ impl Drop for Client {
+ fn keys_from_licenses(licenses: String) -> Vec<i32> {
+     licenses
+         .lines()
+-        .enumerate()
+-        .filter(|(i, _)| i % 4 == 0)
+-        .map(|(_, l)| match *LICENSE_LEX.tokenize(l).as_slice() {
++        // whole response now: just take every "License packageID N:" line
++        .filter(|l| l.contains("License packageID"))
++        .map(|l| match *LICENSE_LEX.tokenize(l).as_slice() {
+             ["packageID", id] => id.parse::<i32>().unwrap_or(-1),
+             _ => -1,
+         })
+-        .filter(|x| x >= &0)
++        // package 0 is Steam's own base package: ~200 tools / dedicated servers, no games — skip it
++        .filter(|x| x > &0)
+         .collect::<Vec<i32>>()
+ }
+ 
+diff --git a/src/interface/game.rs b/src/interface/game.rs
+index 764566c..f0542c5 100644
+--- a/src/interface/game.rs
++++ b/src/interface/game.rs
+@@ -50,11 +50,11 @@ impl Game {
+         if let Datum::Nest(map) = parse(lines) {
+             if let Some(map) = map.get(key) {
+                 let map = map.maybe_nest()?;
+-                if let (
+-                    Some(Datum::Nest(common)),
+-                    Some(Datum::Nest(extended)),
+-                    Some(Datum::Nest(config)),
+-                ) = (map.get("common"), map.get("extended"), map.get("config"))
++                // "extended" / "config" are missing for DLC, installers etc. — treat as empty.
++                let empty: std::collections::HashMap<String, Datum> = std::collections::HashMap::new();
++                let extended = match map.get("extended") { Some(Datum::Nest(m)) => m.clone(), _ => empty.clone() };
++                let config = match map.get("config") { Some(Datum::Nest(m)) => m.clone(), _ => empty.clone() };
++                if let Some(Datum::Nest(common)) = map.get("common")
+                 {
+                     log!(config);
+                     let game = Game {
+diff --git a/src/interface/steam_cmd.rs b/src/interface/steam_cmd.rs
+index 2c7abad..41e452d 100644
+--- a/src/interface/steam_cmd.rs
++++ b/src/interface/steam_cmd.rs
+@@ -36,15 +36,38 @@ impl SteamCmd {
+     }
+ 
+     fn with_args(args: Vec<&str>) -> Result<SteamCmd, STError> {
+-        let mut cmd = SteamCmd::with_args_and_seperator(args, 0x1b)?;
++        // Split on '>' so every chunk boundary can be the end of the "Steam>" prompt.
++        let mut cmd = SteamCmd::with_args_and_seperator(args, b'>')?;
++        // Skip the start up banner, updates and so on: everything up to the first prompt.
++        cmd.until_prompt()?;
++        Ok(cmd)
++    }
+ 
+-        // Send start up data I guess yeah?
+-        cmd.next();
+-        cmd.next();
+-        cmd.next();
+-        cmd.next();
++    /// Reads output until steamcmd prints its "Steam>" prompt again and returns all of it
++    /// (without the prompt). Robust against changes in how steamcmd colours / splits output.
++    pub fn until_prompt(&mut self) -> Result<String, STError> {
++        let mut acc: Vec<u8> = Vec::new();
++        loop {
++            match self.iter.next() {
++                Some(Ok(chunk)) => {
++                    acc.extend_from_slice(&chunk);
++                    acc.push(b'>');
++                    if acc.ends_with(b"Steam>") {
++                        acc.truncate(acc.len() - b"Steam>".len());
++                        return Ok(String::from_utf8_lossy(&acc).into_owned());
++                    }
++                }
++                _ => {
++                    return Err(STError::Problem("steamcmd closed its output".into()));
++                }
++            }
++        }
++    }
+ 
+-        Ok(cmd)
++    /// Runs one command and returns its whole output.
++    pub fn run(&mut self, line: &str) -> Result<String, STError> {
++        self.write(line)?;
++        self.until_prompt()
+     }
+ 
+     pub fn new() -> Result<SteamCmd, STError> {

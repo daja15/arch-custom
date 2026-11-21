@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# ╭──────────────────────────────────────────────────────────────╮
+# ╭──────────────────────────────────────────────────────────────╮
+# │  АВТОЯСКРАВІСТЬ за вебкамерою (датчика світла в ThinkBook   │
+# │  немає). ЛИШЕ ПО КЛІКУ: один кадр з фіксованою витримкою →   │
+# │  наскільки світло в кімнаті → яскравість екрана. Постійного  │
+# │  стеження немає: камера не вмикається сама, процесор спить.  │
+# │    autobright once     заміряти й виставити (кнопка waybar)  │
+# │    autobright status   JSON для waybar                       │
+# │  Змінив яскравість вручну після заміру — при наступному      │
+# │  кліку це врахується як поправка (~/.cache/autobright/bias). │
+# │  Скинути поправку: видалити цей файл.                        │
+# │  Камеру зайнято (дзвінок) / шторка закрита — сповіщення.     │
+# ╰──────────────────────────────────────────────────────────────╯
+MIN=5                # % яскравості в темряві
+MAX=100              # % при яскравому світлі
+DARK=3               # сигнал камери (над чорним рівнем) у темній кімнаті → MIN
+BRIGHT=200           # сигнал при яскравому світлі → MAX
+BLACK=8              # чорний рівень сенсора
+DEV=/dev/video0
+EXPOSURE=1250        # фіксована витримка (максимум, 125 мс) — щоб розрізняти темряву
+SIG=16               # pkill -RTMIN+16 waybar
+C="$HOME/.cache/autobright"
+
+pct()  { brightnessctl -m | cut -d, -f4 | tr -d %; }
+fade() {   # плавно з поточної до $1 % за ~0.8 с
+    local from to i v; from=$(pct); to=$1
+    for i in 1 2 3 4; do v=$(( from + (to - from) * i / 4 )); brightnessctl -q set "$v%"; sleep 0.2; done
+}
+measure() {   # друкує сигнал камери (середня яскравість кадру над чорним рівнем) або нічого
+    # причину збою пишемо у файл: measure працює в підоболонці, змінна до once() не дійде
+    [ -e "$DEV" ] || { echo "Камеру не знайдено (вимкнена?)" > "$C/err"; return 1; }
+    fuser -s "$DEV" 2>/dev/null && { echo "Камера зайнята іншою програмою" > "$C/err"; return 1; }   # не заважати дзвінку
+    : > "$C/err.log"
+    v4l2-ctl -d "$DEV" -c auto_exposure=1 -c exposure_dynamic_framerate=0 -c exposure_time_absolute=$EXPOSURE 2>>"$C/err.log" \
+        || { echo "Камера не приймає налаштування витримки" > "$C/err"; return 1; }
+    local out
+    out=$(timeout 8 ffmpeg -hide_banner -loglevel error -f v4l2 -input_format mjpeg -video_size 320x180 -i "$DEV" \
+          -vf "select=gte(n\,4),scale=32:18" -frames:v 1 -pix_fmt gray -f rawvideo - 2>>"$C/err.log" \
+          | od -An -v -tu1 | awk '{for(i=1;i<=NF;i++){s+=$i;q+=$i*$i;n++}} END{if(n) printf "%.2f %.2f", s/n, sqrt(q/n-(s/n)^2)}')
+    v4l2-ctl -d "$DEV" -c auto_exposure=3 -c exposure_dynamic_framerate=1 2>/dev/null   # повернути автоекспозицію
+    if [ -z "$out" ]; then
+        { echo "Камера не віддала кадр"
+          [ -s "$C/err.log" ] && tail -n 2 "$C/err.log" || echo "(не відповіла за 8 с — можливо, вимкнена клавішею камери)"; } > "$C/err"
+        return 1
+    fi
+    set -- $out
+    # рівний чорний кадр — темна кімната (від закритої шторки не відрізнити) → мінімальна яскравість
+    awk -v m="$1" -v b=$BLACK 'BEGIN{ s = m - b; if (s < 0.1) s = 0.1; print s }'
+}
+target() {   # сигнал → % (логарифмічна шкала, як сприймає око) + поправка користувача
+    awk -v s="$1" -v d=$DARK -v b=$BRIGHT -v lo=$MIN -v hi=$MAX -v bias="$(cat "$C/bias" 2>/dev/null || echo 0)" 'BEGIN{
+        f = log(s / d) / log(b / d); if (f < 0) f = 0; if (f > 1) f = 1
+        t = lo + (hi - lo) * f + bias; if (t < 1) t = 1; if (t > 100) t = 100; printf "%d", t + 0.5 }'
+}
+
+once() {   # один замір → яскравість
+    mkdir -p "$C"
+    local cur set sig t
+    cur=$(pct)
+    pkill -RTMIN+$SIG -x waybar
+    rm -f "$C/err"
+    # друга спроба через секунду: камера після попереднього кадру буває ще не готова
+    if ! sig=$(measure) && { sleep 1; ! sig=$(measure); }; then
+        notify-send -a "Автояскравість" -t 4000 "Не вдалося заміряти" "$(cat "$C/err" 2>/dev/null || echo 'Невідома помилка камери')"
+        pkill -RTMIN+$SIG -x waybar
+        return 1
+    fi
+    # Поправку вчимо лише якщо вручну змінили яскравість НЕЗАБАРОМ після заміру (≤30 хв):
+    # пізніша зміна — це вже інше світло в кімнаті, а не «мені хочеться яскравіше».
+    if set=$(cat "$C/set" 2>/dev/null) && [ -n "$(find "$C/set" -mmin -30 2>/dev/null)" ] \
+       && [ $(( cur > set ? cur - set : set - cur )) -gt 2 ]; then
+        echo $(( $(cat "$C/bias" 2>/dev/null || echo 0) + cur - set )) | awk '{b=$1; if(b>25)b=25; if(b<-25)b=-25; print b}' > "$C/bias"
+    fi
+    t=$(target "$sig")
+    fade "$t"
+    pct > "$C/set"
+    echo "$(date +%H:%M) сигнал $sig → $t% (було $cur%)" > "$C/last"
+    pkill -RTMIN+$SIG -x waybar
+}
+
+case "$1" in
+    once|toggle)
+        # один замір за раз: подвійний клік більше не запускає два заміри, що б'ються за камеру
+        mkdir -p "$C"; exec 9>"$C/lock"; flock -n 9 || exit 0
+        once ;;           # toggle — стара назва (на випадок старих прив'язок)
+    status)
+        info=$(cat "$C/last" 2>/dev/null); bias=$(cat "$C/bias" 2>/dev/null || echo 0)
+        printf '{"text":"\U000f00e1","tooltip":"Автояскравість — клік: заміряти світло камерою й виставити яскравість\\nОстанній замір: %s\\nПоправка: %s%%","class":"off"}\n' "${info:-ще не було}" "$bias" ;;
+    *) echo "autobright once|status" >&2; exit 1 ;;
+esac

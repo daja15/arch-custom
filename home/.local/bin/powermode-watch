@@ -1,0 +1,37 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  Сторож режиму живлення. Чекає подію D-Bus від               │
+# │  power-profiles-daemon (без опитування, 0 навантаження).     │
+# │  Прошивка Lenovo при КОЖНІЙ зміні platform_profile сама      │
+# │  переписує справжній ліміт CPU (MMIO PL1):                   │
+# │    balanced → 24 Вт, performance → 29 Вт.                    │
+# │  Тому після зміни профілю (Fn+Q, будь-яка програма)          │
+# │  знову ставимо наш ліміт і оновлюємо значок у waybar:        │
+# │    performance          → буст (30 Вт)                       │
+# │    balanced/power-saver → економ (10 Вт)                     │
+# ╰──────────────────────────────────────────────────────────────╯
+PL1=/sys/class/powercap/intel-rapl-mmio:0/constraint_0_power_limit_uw
+
+apply() {
+    sleep 1   # даємо прошивці дописати свій ліміт, потім перебиваємо
+    w=$(( $(cat "$PL1") / 1000000 ))
+    case $1 in
+        performance) want=boost; [ "$w" -ge 30 ] && want= ;;
+        *)           want=eco;   [ "$w" -le 10 ] && want= ;;
+    esac
+    if [ -n "$want" ]; then
+        sudo -n /usr/local/bin/power-mode "$want" >/dev/null 2>&1
+        [ $want = boost ] && notify-send -a "Живлення" "Увімкнено буст" "Профіль змінено ззовні (Fn+Q?) — CPU 30 Вт"
+    fi
+    pkill -RTMIN+17 -x waybar
+}
+
+apply "$(powerprofilesctl get 2>/dev/null)"   # вирівняти стан при старті
+
+gdbus monitor --system --dest org.freedesktop.UPower.PowerProfiles 2>/dev/null |
+while read -r line; do
+    case $line in
+        /org/freedesktop/UPower/PowerProfiles:*"'ActiveProfile': <'"*)
+            p=${line#*\'ActiveProfile\': <\'}; apply "${p%%\'*}" ;;
+    esac
+done

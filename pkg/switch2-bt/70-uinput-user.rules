@@ -1,0 +1,6 @@
+# Доступ до /dev/uinput для користувача за робочим місцем (uaccess).
+# Потрібен мосту Switch 2 по Bluetooth (~/.local/share/switch2-bt): він створює
+# віртуальний геймпад через uinput, щоб ігри бачили контролер як звичайний.
+# Встановлення: sudo install -Dm644 70-uinput-user.rules /etc/udev/rules.d/70-uinput-user.rules
+#               sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

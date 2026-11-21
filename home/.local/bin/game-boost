@@ -1,0 +1,22 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  game-boost — буст живлення на час гри.                      │
+# │  У Steam: Властивості → Параметри запуску:                   │
+# │      game-boost %command%                                     │
+# │  Перед грою вмикає буст (CPU 30 Вт, GPU максимум), після     │
+# │  виходу повертає той режим, який був (економ лишиться        │
+# │  економом, якщо ти вже був у бусті — так і лишиться).        │
+# ╰──────────────────────────────────────────────────────────────╯
+PM="$HOME/.config/waybar/scripts/powermode.sh"
+PL1=/sys/class/powercap/intel-rapl-mmio:0/constraint_0_power_limit_uw
+# Steam підкладає свої бібліотеки (оверлей) — нашим утилітам вони не потрібні
+host() { env -u LD_PRELOAD -u LD_LIBRARY_PATH "$@"; }
+
+was=eco; [ $(( $(cat "$PL1") / 1000000 )) -ge 28 ] && was=boost
+[ $was = eco ] && host "$PM" boost
+
+"$@"
+rc=$?
+
+[ $was = eco ] && host "$PM" eco
+exit $rc

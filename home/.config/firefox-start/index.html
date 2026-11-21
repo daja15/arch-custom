@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Стартова сторінка Firefox (див. user.js у профілі). Без скриптів.
+     Віддається за http://127.0.0.1:47800 (serve.sh через systemd firefox-start.socket):
+     на about:blank і на file:// Vimium у Firefox не працює, а на http — так.
+     Фон — bg.jpg (папороть, 1920×1080); замінити: поклади інше фото з тією ж назвою. -->
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Нова сторінка</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: #e9ebe9 url("/bg.jpg") center / cover no-repeat;
+         font: 15px/2 "JetBrainsMono Fast", monospace; }
+  .hints { position: fixed; left: 9%; top: 50%; transform: translateY(-50%);
+           padding: 14px 26px; border-radius: 12px;
+           background: rgba(255, 255, 255, 0.55); color: #5b6355; }
+  kbd { color: #4f6b2e; font: inherit; font-weight: bold; display: inline-block; min-width: 2.2em; }
+</style>
+</head>
+<body>
+<div class="hints">
+  <div><kbd>o</kbd>адреса або пошук</div>
+  <div><kbd>O</kbd>те саме в новій вкладці</div>
+  <div><kbd>b</kbd>закладки</div>
+  <div><kbd>T</kbd>відкриті вкладки</div>
+</div>
+</body>
+</html>

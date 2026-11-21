@@ -1,0 +1,230 @@
+#!/usr/bin/python3 -I
+# ╭──────────────────────────────────────────────────────────────╮
+# │  ARC — архіватор / деархіватор (меню на rofi, «Тиха ніч»)    │
+# │                                                              │
+# │  arc open АРХІВ      — подвійний клік по архіву:              │
+# │                        розпакувати поруч (у ту ж теку);      │
+# │                        з затиснутим Shift — меню «куди»      │
+# │  arc extract-to АРХІВ — одразу меню «куди» (контекстне меню)  │
+# │  arc compress ШЛЯХИ… — меню: формат → куди → створити архів  │
+# │                                                              │
+# │  Розпакування: якщо в архіві одна тека/файл — кладемо її     │
+# │  прямо поруч; якщо багато — у нову теку з назвою архіву      │
+# │  (щоб не засмічувати теку). Нічого не перезаписує: зайняте   │
+# │  ім'я → «назва (2)». Шляхи «../» bsdtar відкидає сам.        │
+# ╰──────────────────────────────────────────────────────────────╯
+import os, shutil, subprocess, sys, tempfile
+
+# Формати для створення: підпис у меню → (розширення, аргументи bsdtar)
+FORMATS = [
+    ("  ZIP — відкривається будь-де",      ".zip",     ["--format", "zip"]),
+    ("  7Z — найменший розмір",             ".7z",      ["--format", "7zip"]),
+    ("  TAR.GZ — класика Linux",            ".tar.gz",  ["--format", "pax", "--gzip"]),
+    ("  TAR.ZST — швидкий і щільний",       ".tar.zst", ["--format", "pax", "--zstd"]),
+]
+
+# Подвійні розширення, які треба відрізати цілком, щоб отримати назву теки
+MULTI_EXT = (".tar.gz", ".tar.xz", ".tar.zst", ".tar.bz2", ".tar.lz", ".tar.lzma", ".tar.z")
+
+
+# ───────────── Допоміжне ─────────────
+def rofi(prompt, items, mesg=None, lines=None):
+    """Меню rofi у стилі powermenu. Повертає вибраний рядок або None (Esc)."""
+    cmd = ["rofi", "-dmenu", "-p", prompt, "-no-custom", "-i", "-format", "i",
+           "-theme-str", "window { width: 520px; }",
+           "-theme-str", f"listview {{ lines: {lines or len(items)}; }}",
+           "-theme-str", "mode-switcher { enabled: false; }",
+           "-theme-str", 'entry { placeholder: "Оберіть…"; }']
+    if mesg:
+        cmd += ["-mesg", mesg]
+    r = subprocess.run(cmd, input="\n".join(items), capture_output=True, text=True)
+    out = r.stdout.strip()
+    return int(out) if r.returncode == 0 and out.isdigit() else None
+
+
+def error(text):
+    subprocess.run(["rofi", "-e", f"Архіватор: {text}"])
+    sys.exit(1)
+
+
+def notify(text):
+    subprocess.Popen(["notify-send", "-a", "Архіватор", "-i", "package-x-generic", text],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def shift_held():
+    """Чи затиснуто Shift саме зараз (питаємо Hyprland)."""
+    try:
+        r = subprocess.run(["hyprctl", "eval",
+                            'return tostring(hl.is_key_down("Shift_L") or hl.is_key_down("Shift_R"))'],
+                           capture_output=True, text=True, timeout=1)
+        return "true" in r.stdout
+    except Exception:
+        return False
+
+
+def pick_dir(start):
+    """Вікно вибору теки (zenity). None — скасовано."""
+    r = subprocess.run(["zenity", "--file-selection", "--directory",
+                        "--title=Оберіть теку", f"--filename={start.rstrip('/')}/"],
+                       capture_output=True, text=True)
+    path = r.stdout.strip()
+    return path if r.returncode == 0 and path else None
+
+
+def unique(path):
+    """Вільне ім'я: «назва», «назва (2)», «назва (3)»…"""
+    if not os.path.lexists(path):
+        return path
+    d, name = os.path.split(path)
+    stem, ext = name, ""
+    for m in MULTI_EXT + (".zip", ".7z", ".gz", ".tar"):
+        if name.lower().endswith(m):
+            stem, ext = name[: -len(m)], name[-len(m):]
+            break
+    else:
+        stem, ext = os.path.splitext(name) if os.path.isfile(path) else (name, "")
+    n = 2
+    while os.path.lexists(os.path.join(d, f"{stem} ({n}){ext}")):
+        n += 1
+    return os.path.join(d, f"{stem} ({n}){ext}")
+
+
+def archive_stem(path):
+    name = os.path.basename(path)
+    low = name.lower()
+    for m in MULTI_EXT:
+        if low.endswith(m):
+            return name[: -len(m)]
+    if low.endswith(".tgz"):
+        return name[:-4]
+    return os.path.splitext(name)[0]
+
+
+def is_plain_gz(path):
+    """Звичайний стиснутий файл .gz (не tar) — bsdtar такий не розпакує, потрібен gunzip."""
+    if not path.lower().endswith(".gz") or path.lower().endswith(".tar.gz"):
+        return False
+    r = subprocess.run(["bsdtar", "-tf", path], capture_output=True)
+    return r.returncode != 0
+
+
+# ───────────── Розпакування ─────────────
+def extract(archive, dest):
+    archive = os.path.abspath(archive)
+    os.makedirs(dest, exist_ok=True)
+
+    if is_plain_gz(archive):                              # file.txt.gz → file.txt
+        out = unique(os.path.join(dest, os.path.basename(archive)[:-3]))
+        with open(out, "wb") as f:
+            if subprocess.run(["gunzip", "-c", archive], stdout=f).returncode != 0:
+                os.remove(out)
+                error("не вдалося розпакувати " + os.path.basename(archive))
+        notify(f"Розпаковано: {os.path.basename(out)}")
+        return
+
+    tmp = tempfile.mkdtemp(prefix=".arc-", dir=dest)      # спершу в приховану теку поруч
+    try:
+        r = subprocess.run(["bsdtar", "-xf", archive, "-C", tmp], capture_output=True, text=True)
+        if r.returncode != 0:
+            msg = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "невідома помилка"
+            if "passphrase" in msg.lower() or "encrypt" in msg.lower():
+                msg = "архів захищений паролем (поки не підтримується)"
+            error(f"{os.path.basename(archive)} — {msg}")
+        top = os.listdir(tmp)
+        if not top:
+            error(f"{os.path.basename(archive)} — архів порожній або пошкоджений")
+        if len(top) == 1:                                 # одна тека/файл — кладемо прямо поруч
+            final = unique(os.path.join(dest, top[0]))
+            os.rename(os.path.join(tmp, top[0]), final)
+        else:                                             # багато — у теку з назвою архіву
+            final = unique(os.path.join(dest, archive_stem(archive)))
+            os.rename(tmp, final)
+            tmp = None
+        notify(f"Розпаковано: {os.path.basename(final)}")
+    finally:
+        if tmp and os.path.isdir(tmp):
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def ask_extract_dest(archive):
+    here = os.path.dirname(os.path.abspath(archive))
+    stem = archive_stem(archive)
+    items = [f"  Сюди — {here.replace(os.path.expanduser('~'), '~')}",
+             f"  У нову теку «{stem}»",
+             "  Вибрати теку…"]
+    i = rofi("  Розпакувати", items, mesg=os.path.basename(archive))
+    if i is None:
+        return None
+    if i == 0:
+        return here
+    if i == 1:
+        d = unique(os.path.join(here, stem))
+        os.makedirs(d)
+        return d
+    return pick_dir(here)
+
+
+# ───────────── Створення архіву ─────────────
+def compress(paths):
+    paths = [os.path.abspath(p) for p in paths]
+    for p in paths:
+        if not os.path.exists(p):
+            error(f"не знайдено: {p}")
+    here = os.path.dirname(paths[0])
+    name = (os.path.basename(paths[0]) if len(paths) == 1 else "Архів")
+    if len(paths) == 1 and os.path.isfile(paths[0]):
+        name = os.path.splitext(name)[0] or name
+    what = os.path.basename(paths[0]) if len(paths) == 1 else f"{len(paths)} об'єктів"
+
+    i = rofi("  Формат", [f[0] for f in FORMATS], mesg=f"Стиснути: {what}")
+    if i is None:
+        return
+    _, ext, fmt_args = FORMATS[i]
+
+    j = rofi("  Куди", [f"  Сюди — {here.replace(os.path.expanduser('~'), '~')}", "  Вибрати теку…"],
+             mesg=f"{name}{ext}")
+    if j is None:
+        return
+    dest = here if j == 0 else pick_dir(here)
+    if not dest:
+        return
+
+    out = unique(os.path.join(dest, name + ext))
+    # Шляхи всередині архіву — відносно спільної батьківської теки (без повних шляхів)
+    cmd = ["bsdtar", "-cf", out, *fmt_args]
+    for p in paths:
+        cmd += ["-C", os.path.dirname(p), os.path.basename(p)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        if os.path.exists(out):
+            os.remove(out)
+        error(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "не вдалося створити архів")
+    notify(f"Створено: {os.path.basename(out)}")
+
+
+# ───────────── Вхід ─────────────
+def main():
+    if len(sys.argv) < 3:
+        print(__doc__ or "arc open|extract-to|compress ШЛЯХИ…")
+        sys.exit(2)
+    cmd, args = sys.argv[1], sys.argv[2:]
+    if cmd == "open":
+        shift = shift_held()
+        for a in args:
+            dest = ask_extract_dest(a) if shift else os.path.dirname(os.path.abspath(a))
+            if dest:
+                extract(a, dest)
+    elif cmd == "extract-to":
+        for a in args:
+            dest = ask_extract_dest(a)
+            if dest:
+                extract(a, dest)
+    elif cmd == "compress":
+        compress(args)
+    else:
+        sys.exit(f"невідома команда: {cmd}")
+
+
+if __name__ == "__main__":
+    main()

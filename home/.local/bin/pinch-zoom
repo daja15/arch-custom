@@ -1,0 +1,147 @@
+#!/usr/bin/python3 -I
+# ╭──────────────────────────────────────────────────────────────╮
+# │  ПЛАВНИЙ ЗУМ ЩИПКОМ (як на MacBook) для БУДЬ-ЯКОЇ програми    │
+# │  Читає пальці на тачпаді; коли два пальці розводяться/        │
+# │  зводяться — безперервно шле програмі Ctrl + дрібну прокрутку │
+# │  (Ctrl+колесо = зум майже всюди). Зум іде за пальцями.        │
+# │  Звичайна прокрутка двома пальцями не чіпається.              │
+# │  Енергія: спить, поки тачпада не торкаються (лише події).     │
+# │  Доступ до тачпада: /etc/udev/rules.d/70-touchpad-pinch.rules │
+# ╰──────────────────────────────────────────────────────────────╯
+import json, math, os, subprocess, sys, time
+from evdev import InputDevice, UInput, ecodes as e, list_devices
+
+TOUCHPAD_NAME = "SYNA2BA6:00 06CB:CE2D Touchpad"   # ім'я тачпада (cat /sys/class/input/event*/device/name)
+
+PINCH_START_MM = 5.0    # на скільки мм має змінитись відстань між пальцями, щоб це вважалось щипком
+SCROLL_WINS_MM = 5.0    # якщо раніше центр пальців зсунувся на стільки мм — це прокрутка, щипок не ловимо
+SPEED          = 900    # чутливість: «одиниць колеса» (120 = 1 клацання) на подвоєння відстані між пальцями
+INVERT         = False  # True — якщо зум іде навпаки
+
+# Програми, що вміють щипок самі (плавно, нативно) — їм не заважаємо (клас вікна: hyprctl activewindow)
+NATIVE_PINCH = {"firefox"}
+
+
+def find_touchpad():
+    for path in list_devices():
+        d = InputDevice(path)
+        if d.name == TOUCHPAD_NAME:
+            return d
+        d.close()
+    sys.exit(f"pinch-zoom: тачпад «{TOUCHPAD_NAME}» не знайдено або немає доступу (udev-правило?)")
+
+
+def hypr(*args):
+    try:
+        return subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=0.3).stdout
+    except Exception:
+        return ""
+
+
+def pinch_allowed():
+    """Чи слати зум зараз: не для програм із власним щипком і не під час SUPER (там лупа екрана)."""
+    try:
+        cls = json.loads(hypr("activewindow", "-j") or "{}").get("class", "")
+    except ValueError:
+        cls = ""
+    if cls in NATIVE_PINCH:
+        return False
+    sup = hypr("eval", 'return tostring(hl.is_key_down("Super_L") or hl.is_key_down("Super_R"))')
+    return "true" not in sup
+
+
+def main():
+    tp = find_touchpad()
+    ax = tp.absinfo(e.ABS_MT_POSITION_X)
+    ay = tp.absinfo(e.ABS_MT_POSITION_Y)
+    rx = ax.resolution or 12          # одиниць на мм
+    ry = ay.resolution or 12
+
+    ui = UInput({e.EV_KEY: [e.KEY_LEFTCTRL],
+                 e.EV_REL: [e.REL_WHEEL, e.REL_WHEEL_HI_RES]},
+                name="pinch-zoom virtual wheel")
+
+    slots, slot = {}, 0               # слот → [x, y] (протокол multitouch B)
+    state = "idle"                    # idle → wait (2 пальці, чекаємо) → pinch / scroll
+    d0 = c0 = None
+    last_log = 0.0
+    acc = 0.0                         # накопичена прокрутка (в 1/120 клацання)
+    acc_lo = 0                        # для старого REL_WHEEL (цілі клацання)
+    ctrl = False
+
+    def dist_center():
+        (x1, y1), (x2, y2) = list(slots.values())[:2]
+        dx, dy = (x2 - x1) / rx, (y2 - y1) / ry
+        return math.hypot(dx, dy), ((x1 + x2) / 2 / rx, (y1 + y2) / 2 / ry)
+
+    def finish():
+        nonlocal state, ctrl, acc, acc_lo
+        if ctrl:
+            ui.write(e.EV_KEY, e.KEY_LEFTCTRL, 0)
+            ui.syn()
+            ctrl = False
+        state, acc, acc_lo = "idle", 0.0, 0
+
+    for ev in tp.read_loop():
+        if ev.type == e.EV_ABS:
+            if ev.code == e.ABS_MT_SLOT:
+                slot = ev.value
+            elif ev.code == e.ABS_MT_TRACKING_ID:
+                if ev.value < 0:
+                    slots.pop(slot, None)
+                else:
+                    slots[slot] = [None, None]
+            elif ev.code == e.ABS_MT_POSITION_X and slot in slots:
+                slots[slot][0] = ev.value
+            elif ev.code == e.ABS_MT_POSITION_Y and slot in slots:
+                slots[slot][1] = ev.value
+            continue
+        if ev.type != e.EV_SYN or ev.code != e.SYN_REPORT:
+            continue
+
+        ready = len(slots) == 2 and all(None not in p for p in slots.values())
+        if not ready:
+            if state != "idle":
+                finish()
+            continue
+
+        d, c = dist_center()
+        if state == "idle":
+            state, d0, c0 = "wait", d, c
+            continue
+        if state == "scroll":
+            continue
+        if state == "wait":
+            if abs(d - d0) >= PINCH_START_MM:
+                if not pinch_allowed():
+                    state = "scroll"          # ігноруємо до кінця жесту
+                    continue
+                state, last_log = "pinch", math.log(max(d, 1e-3))
+                ui.write(e.EV_KEY, e.KEY_LEFTCTRL, 1)
+                ui.syn()
+                ctrl = True
+            elif math.hypot(c[0] - c0[0], c[1] - c0[1]) >= SCROLL_WINS_MM:
+                state = "scroll"
+            continue
+
+        # state == "pinch": скільки «прокрутити» = зміна log(відстані)
+        lg = math.log(max(d, 1e-3))
+        acc += (lg - last_log) * SPEED / math.log(2) * (-1 if INVERT else 1)
+        last_log = lg
+        step = int(acc)                   # цілі одиниці hi-res
+        if step:
+            acc -= step
+            ui.write(e.EV_REL, e.REL_WHEEL_HI_RES, step)
+            acc_lo += step
+            lo = int(acc_lo / 120)
+            if lo:
+                acc_lo -= lo * 120
+                ui.write(e.EV_REL, e.REL_WHEEL, lo)
+            ui.syn()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

@@ -1,0 +1,10 @@
+# Відповісти на один запит стартової сторінки Firefox (~/.config/firefox-start/serve.sh).
+# Запускається з firefox-start.socket на кожне з'єднання й одразу завершується.
+[Unit]
+Description=Стартова сторінка Firefox (відповідь)
+
+[Service]
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+ExecStart=%h/.config/firefox-start/serve.sh

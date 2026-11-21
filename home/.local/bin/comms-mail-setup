@@ -1,0 +1,138 @@
+#!/bin/sh
+# ╭──────────────────────────────────────────────────────────────╮
+# │  НАЛАШТУВАННЯ ПОШТИ (aerc): Gmail + ukr.net                  │
+# │  Питає адреси й паролі, пише ~/.config/aerc/accounts.conf.   │
+# │  Паролі — в окремих файлах з доступом лише для тебе:         │
+# │    ~/.local/share/comms/mail/<скринька>.pass (права 600)     │
+# │  Запустити ще раз (переписати все наново):                   │
+# │    comms-mail-setup                                          │
+# │  Додати ще одну скриньку (Gmail / ukr.net / будь-яка IMAP),  │
+# │  не чіпаючи наявні — кнопка в меню панелі або:               │
+# │    comms-mail-setup --add                                    │
+# ╰──────────────────────────────────────────────────────────────╯
+set -e
+ACC="$HOME/.config/aerc/accounts.conf"
+PASS_DIR="$HOME/.local/share/comms/mail"
+umask 077
+mkdir -p "$PASS_DIR" "$HOME/.config/aerc"
+
+B=$(printf '\033[1m') A=$(printf '\033[38;2;136;192;208m') M=$(printf '\033[38;2;125;132;148m') R=$(printf '\033[0m')
+
+ask_pass() {   # ask_pass <файл> <підказка>
+    printf '%s' "$2"
+    stty -echo 2>/dev/null || true; read -r p; stty echo 2>/dev/null || true; echo
+    printf '%s' "$p" > "$1"
+}
+
+enc() { printf '%s' "$1" | sed 's/@/%40/g'; }   # @ в адресі для URL
+
+# ───── Режим «додати одну скриньку» ─────
+if [ "$1" = "--add" ]; then
+    echo "${B}Додати поштову скриньку${R}"
+    echo
+    echo "  ${A}1${R}  Gmail       ${M}(потрібен пароль застосунку: https://myaccount.google.com/apppasswords)${R}"
+    echo "  ${A}2${R}  ukr.net     ${M}(увімкни IMAP: mail.ukr.net → Налаштування → Поштові програми)${R}"
+    echo "  ${A}3${R}  інша        ${M}(Outlook, i.ua, власний сервер — вкажеш адреси серверів)${R}"
+    echo
+    printf 'Вибір [1-3]: '; read -r kind
+    case "$kind" in
+        1) imap=imap.gmail.com; smtp=smtp.gmail.com; extra="copy-to       =" ;;   # Gmail сам кладе копію в «Надіслані»
+        2) imap=imap.ukr.net;   smtp=smtp.ukr.net;   extra="" ;;
+        3) printf 'IMAP-сервер (напр. outlook.office365.com): '; read -r imap
+           printf 'SMTP-сервер (напр. smtp.office365.com): ';    read -r smtp
+           extra="" ;;
+        *) echo "Скасовано."; exit 1 ;;
+    esac
+    [ -n "$imap" ] && [ -n "$smtp" ] || { echo "Сервери не вказано."; exit 1; }
+    printf 'Адреса: '; read -r addr
+    [ -n "$addr" ] || { echo "Скасовано."; exit 1; }
+    printf 'Назва у пошті [%s]: ' "$addr"; read -r name
+    [ -n "$name" ] || name="$addr"
+    if [ -f "$ACC" ] && grep -qxF "[$name]" "$ACC"; then
+        echo "Скринька з назвою «$name» уже є."; exit 1
+    fi
+    pf="$PASS_DIR/$(printf '%s' "$addr" | tr -c 'A-Za-z0-9._-' '_').pass"
+    ask_pass "$pf" "Пароль (введення не видно): "
+    u=$(enc "$addr")
+    { [ -s "$ACC" ] && echo; cat <<EOF
+[$name]
+source        = imaps://$u@$imap:993
+source-cred-cmd = cat $pf
+outgoing      = smtps://$u@$smtp:465
+outgoing-cred-cmd = cat $pf
+from          = $addr
+default       = INBOX
+$extra
+folders-sort  = INBOX
+cache-headers = true
+EOF
+    } >> "$ACC"
+    chmod 600 "$ACC" "$pf"
+    echo
+    echo "${B}Готово.${R} «$name» додано — з'явиться вкладкою в aerc."
+    sleep 1
+    exit 0
+fi
+
+echo "${B}Налаштування пошти${R}  ${M}(Enter без адреси — пропустити скриньку)${R}"
+echo
+
+: > "$ACC.new"
+
+# ───── Gmail ─────
+echo "${A}${B}Gmail${R}"
+echo "${M}Потрібен «пароль застосунку» (звичайний пароль Google не підійде):"
+echo "  1. Увімкни двоетапну перевірку: https://myaccount.google.com/security"
+echo "  2. Створи пароль застосунку:   https://myaccount.google.com/apppasswords"
+echo "     (назва будь-яка, напр. aerc) → скопіюй 16 літер.${R}"
+printf 'Адреса Gmail: '; read -r gmail
+if [ -n "$gmail" ]; then
+    ask_pass "$PASS_DIR/gmail.pass" "Пароль застосунку (16 літер, введення не видно): "
+    u=$(enc "$gmail")
+    cat >> "$ACC.new" <<EOF
+[Gmail]
+source        = imaps://$u@imap.gmail.com:993
+source-cred-cmd = cat $PASS_DIR/gmail.pass
+outgoing      = smtps://$u@smtp.gmail.com:465
+outgoing-cred-cmd = cat $PASS_DIR/gmail.pass
+from          = $gmail
+default       = INBOX
+copy-to       =
+folders-sort  = INBOX
+cache-headers = true
+
+EOF
+fi
+echo
+
+# ───── ukr.net ─────
+echo "${A}${B}ukr.net${R}"
+echo "${M}Спершу в налаштуваннях ukr.net увімкни доступ для поштових програм (IMAP):"
+echo "  mail.ukr.net → Налаштування → Поштові програми → «Дозволити IMAP».${R}"
+printf 'Адреса ukr.net: '; read -r ukr
+if [ -n "$ukr" ]; then
+    ask_pass "$PASS_DIR/ukrnet.pass" "Пароль (введення не видно): "
+    u=$(enc "$ukr")
+    cat >> "$ACC.new" <<EOF
+[ukr.net]
+source        = imaps://$u@imap.ukr.net:993
+source-cred-cmd = cat $PASS_DIR/ukrnet.pass
+outgoing      = smtps://$u@smtp.ukr.net:465
+outgoing-cred-cmd = cat $PASS_DIR/ukrnet.pass
+from          = $ukr
+default       = INBOX
+folders-sort  = INBOX
+cache-headers = true
+
+EOF
+fi
+
+if [ ! -s "$ACC.new" ]; then
+    rm -f "$ACC.new"
+    echo "Жодної скриньки не додано."
+    exit 1
+fi
+mv "$ACC.new" "$ACC"
+chmod 600 "$ACC" "$PASS_DIR"/*.pass 2>/dev/null || true   # aerc вимагає права 600 для accounts.conf
+echo
+echo "${B}Готово.${R} Скриньки записані в $ACC"

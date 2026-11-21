@@ -1,0 +1,11 @@
+# Оновити кеш файлів для меню rofi (символ ') — ~/.cache/rofi/files.rofi
+# Запускається таймером rofi-files.timer; найнижчий пріоритет процесора й диска.
+[Unit]
+Description=Кеш файлів для меню rofi
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/rofi/scripts/universal.py files-index
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Відео поверх вікон
+Comment=Відкриває відео з кнопки у Firefox (посилання pip: і pipvlc:)
+Exec=pipctl link %u
+NoDisplay=true
+MimeType=x-scheme-handler/pip;x-scheme-handler/pipvlc;

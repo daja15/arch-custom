@@ -1,0 +1,360 @@
+#!/usr/bin/env python3
+# ╭──────────────────────────────────────────────────────────────╮
+# │  APPLY — застосувати тему з ~/.config/theme/theme.conf       │
+# │                                                              │
+# │  1. Генерує ~/.config/theme/gen/ — та сама тема в форматах   │
+# │     кожної програми:                                         │
+# │       theme.css   GTK3: waybar, віджети столу, знімки,       │
+# │                   гарячі краї                                │
+# │       theme4.css  GTK4: сповіщення, плашка гучності          │
+# │                   (+ кольори числами для rgba(var(…), α))    │
+# │       theme.rasi  rofi                                       │
+# │       theme.lua   Hyprland (таблиці C і THEME)               │
+# │       theme.h     програми на C (еквалайзер, віджети, меню)  │
+# │       theme.py    програми на Python                         │
+# │       kitty.conf  шрифти й кольори терміналу                 │
+# │       theme.sh    shell: TH_<НАЗВА>="#rrggbb" (zsh, waybar)    │
+# │       + усе з templates/ ({назва} → колір): micro.micro,      │
+# │         hyprlock.conf (екран блокування), aerc.styleset      │
+# │         (пошта), nchat-color.conf (Telegram)                 │
+# │       satty.toml  редактор знімків (~/.config/satty/config.toml │
+# │                   — посилання на нього)                      │
+# │  2. Оновлює програми: перезбирає програми на C, перечитує    │
+# │     вигляд waybar / сповіщень / kitty / Hyprland,            │
+# │     перезапускає віджети.                                    │
+# │                                                              │
+# │  3. Розділ [meta]: вікна програм GTK/Firefox темні / світлі. │
+# │                                                              │
+# │  Перемикач тем (меню): ~/.config/theme/theme (SUPER+Shift+T) │
+# │  apply          згенерувати й оновити все                    │
+# │  apply --gen    лише згенерувати (для збірки й встановлення) │
+# ╰──────────────────────────────────────────────────────────────╯
+import os
+import re
+import subprocess
+import sys
+
+DIR = os.path.dirname(os.path.realpath(__file__))
+GEN = os.path.join(DIR, "gen")
+HEAD = "ЗГЕНЕРОВАНО з ~/.config/theme/theme.conf — не редагуй, змінюй theme.conf і запусти ~/.config/theme/apply"
+
+
+def parse(path):
+    """theme.conf → {розділ: {назва: значення}}. Коментар — « #» після пробілу (не плутати з #hex)."""
+    data, sec = {}, None
+    for raw in open(path, encoding="utf-8"):
+        line = re.sub(r"\s+#\s.*$", "", raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            sec = data.setdefault(line.strip("[]"), {})
+        elif "=" in line and sec is not None:
+            k, v = (x.strip() for x in line.split("=", 1))
+            sec[k] = v
+    return data
+
+
+def rgb(h):
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (1, 3, 5))
+
+
+def ident(name):                         # «accent-soft» → «accent_soft» (Lua, C, Python)
+    return name.replace("-", "_")
+
+
+def write(name, text):
+    with open(os.path.join(GEN, name), "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+# Типографіка й форма за замовчуванням (тема може їх перевизначити в [type] / [shape])
+TYPE_DEFAULT = {"display": "22", "title": "12", "subtitle": "9", "body": "10", "caption": "8",
+                "icon": "12", "bold": "700", "medium": "600"}
+SHAPE_DEFAULT = {"radius-control": "8", "pad-y": "14", "pad-x": "16", "gap": "8", "card-alpha": "0.72"}
+
+
+def ui_kit(c, f, ty, s):
+    """UI-кіт (GTK3/GTK4 CSS): типографіка, картка, рядки списків, кнопки, перемикач,
+    чекбокс, радіокнопка, шкали. Основа — віджети робочого столу. Програми додають
+    віджетам ці класи, а не малюють кожна своє."""
+    rc, ry, rx, gap = s["radius-control"], s["pad-y"], s["pad-x"], s["gap"]
+    return f"""
+/* ═════════════ UI-КІТ — однаковий вигляд усього (основа — віджети столу) ═════════════ */
+/* ── Типографіка: .t-display / .t-title / .t-subtitle / .t-body / .t-caption, + .t-bold, .mono */
+.t-display  {{ font-size: {ty['display']}pt; font-weight: {ty['bold']}; color: @text; }}
+.t-title    {{ font-size: {ty['title']}pt; font-weight: {ty['bold']}; color: @accent2; }}
+.t-subtitle {{ font-size: {ty['subtitle']}pt; font-weight: {ty['medium']}; color: @muted; }}
+.t-body     {{ font-size: {ty['body']}pt; color: @text; }}
+.t-caption  {{ font-size: {ty['caption']}pt; color: @dim; }}
+.t-bold     {{ font-weight: {ty['bold']}; color: @text; }}
+.t-accent   {{ color: @accent; }}
+.t-icon     {{ font-family: "{f['mono']}"; color: @accent; }}
+
+/* ── Картка: напівпрозорий фон, тонка рамка. Будова (сітка 4 px):
+ *    ┌─ 16 ─────────────────────────────── 16 ─┐
+ *    │ [іконка 24] 12 Заголовок      [керування] │  .ui-head — висота 28, знизу 12
+ *    │              підпис стану                │  .ui-sub  — під назвою, у тій самій колонці
+ *    │ РОЗДІЛ                                   │  .ui-section — згори 12, знизу 4
+ *    │ [іконка 24] 12 Назва             [дії]   │  .ui-row — рядок списку: 8 по боках, тло при наведенні
+ *    │                підпис                    │             виходить на 8 px за край тексту
+ *    │ [  кнопка  ] 8 [  кнопка  ]              │  .ui-actions — згори 12, кнопки нарівно
+ *    └──────────────────────────────────────────┘
+ *  Картка має 8 px поля + 8 px кожен блок усередині = 16; рядки списків (.ui-row у .ui-list
+ *  чи прямо в картці) займають і ці 8 px — їхнє тло при наведенні ширше за текст, а іконки
+ *  й текст стоять на тих самих лініях, що й у заголовку. */
+.ui-card {{
+    background-color: alpha(@bg, {s['card-alpha']});
+    border: 1px solid @line; border-radius: {s['radius-card']}px;
+    padding: {ry}px {int(rx) // 2}px; font-size: {ty['body']}pt; color: @text;
+}}
+.ui-card > * {{ margin-left: {int(rx) // 2}px; margin-right: {int(rx) // 2}px; }}
+.ui-card > .ui-row, .ui-card > .ui-list {{ margin-left: 0; margin-right: 0; }}
+.ui-list > .ui-section, .ui-list > .ui-empty {{ margin-left: {int(rx) // 2}px; margin-right: {int(rx) // 2}px; }}
+.ui-head {{ min-height: 28px; margin-bottom: {int(gap) + 4}px; }}
+.ui-sub {{ margin-top: 2px; }}                        /* підпис під назвою в заголовку */
+.ui-section {{ margin-top: {int(gap) + 4}px; margin-bottom: {int(gap) // 2}px; }}
+.ui-actions {{ margin-top: {int(gap) + 4}px; }}
+.ui-empty {{ margin-top: {int(gap) // 2}px; }}
+/* Колонка іконки: 24 px, моноширинні значки (не вилазять за клітинку) */
+.ui-lead {{ min-width: 24px; font-family: "{f['mono']}"; font-size: 17pt; color: @muted; }}
+.ui-head .ui-lead {{ color: @accent; }}
+.ui-row:hover .ui-lead, .ui-row.active .ui-lead {{ color: @accent; }}
+
+/* ── Рядок списку (пристрій, гра, сервіс, пункт меню): наведення — тло, вибране — акцент */
+.ui-row {{ background: none; border: none; box-shadow: none; border-radius: {rc}px; padding: 6px {int(rx) // 2}px; min-height: 28px; }}
+.ui-row.ui-row-dense {{ padding-top: 2px; padding-bottom: 2px; }}   /* щільний список: одна лінія */
+.ui-row:hover {{ background-color: alpha(@overlay, 0.8); }}
+.ui-row.active, .ui-row:checked {{ background-color: @accent-bg; color: @accent; }}
+.ui-row:disabled {{ background: none; }}
+
+/* ── Поле вибору (select): як рядок списку в рамці; клік — список під ним */
+.ui-select {{
+    background: alpha(@surface, 0.8); border: 1px solid @line; border-radius: {rc}px; box-shadow: none;
+    padding: 6px {int(rx) // 2 - 1}px; min-height: 0;
+}}
+.ui-card > .ui-select {{ margin-left: 0; margin-right: 0; }}   /* значок — на тій самій лінії, що й у заголовку */
+.ui-select:hover {{ border-color: @accent; }}
+.ui-select.open {{ border-color: @accent; background: @accent-bg; }}
+.ui-select-arrow {{ font-family: "{f['mono']}"; font-size: 12pt; color: @muted; }}
+.ui-select:hover .ui-select-arrow, .ui-select.open .ui-select-arrow {{ color: @accent; }}
+.ui-select-list {{ margin-top: 4px; }}
+
+/* ── Кнопка: звичайна / .primary (головна дія, «увімкнено») / .danger / вимкнена */
+.ui-btn {{
+    background: alpha(@surface, 0.8); border: 1px solid @line; border-radius: {rc}px; box-shadow: none;
+    color: @text; padding: 0 12px; min-height: 28px; min-width: 0;
+    font-size: {ty['subtitle']}pt; font-weight: {ty['medium']};
+}}
+.ui-btn:hover {{ border-color: @accent; color: @accent; }}
+.ui-btn.primary, .ui-btn.active, .ui-btn:checked {{ background: @accent-bg; border-color: @accent; color: @accent; }}
+.ui-btn.danger, .ui-btn.primary.danger {{ background: @red-bg; border-color: @red; color: @red-text; }}
+.ui-btn:disabled {{ background: transparent; border-color: alpha(@line, 0.5); color: @dim; }}
+
+/* ── Кнопка-іконка (без рамки): наведення — акцент, увімкнена — акцентне тло */
+.ui-icon-btn {{
+    background: none; border: none; box-shadow: none; border-radius: {rc}px;
+    padding: 0; min-height: 28px; min-width: 28px; color: @muted; font-family: "{f['mono']}"; font-size: 12pt;
+}}
+.ui-icon-btn:hover {{ background-color: alpha(@overlay, 0.8); color: @accent; }}
+.ui-icon-btn.active, .ui-icon-btn:checked {{ background-color: @accent-bg; color: @accent; }}
+.ui-icon-btn.danger:hover, .ui-icon-btn.danger:checked {{ background-color: @red-bg; color: @red; }}
+.ui-icon-btn:disabled {{ background: none; color: @dim; }}
+
+/* ── Перемикач: доріжка-пігулка, кругла ручка; увімкнено — акцент */
+switch {{ min-width: 36px; min-height: 20px; padding: 0; border-radius: 11px; border: none; box-shadow: none; background-color: @line; background-image: none; }}
+switch:checked {{ background-color: @accent; }}
+switch slider {{ min-width: 16px; min-height: 16px; margin: 2px; border-radius: 9px; border: none; box-shadow: none; background-color: @text; background-image: none; }}
+switch:checked slider {{ background-color: @bg; }}
+switch:disabled {{ opacity: 0.5; }}
+
+/* ── Чекбокс (квадрат) і радіокнопка (коло): порожні — рамка, вибрані — акцент */
+check, radio {{
+    min-width: 16px; min-height: 16px; margin: 0 6px 0 0; padding: 0;
+    border: 1px solid @faint; box-shadow: none; background-color: transparent; background-image: none; color: transparent;
+}}
+check {{ border-radius: 5px; }}
+radio {{ border-radius: 9px; }}
+check:hover, radio:hover {{ border-color: @accent; }}
+check:checked {{ background-color: @accent; border-color: @accent; color: @bg; -gtk-icon-source: -gtk-icontheme("object-select-symbolic"); }}
+radio:checked {{ border-color: @accent; background-image: radial-gradient(circle, @accent 3px, transparent 4px); }}
+check:disabled, radio:disabled {{ opacity: 0.5; }}
+
+/* ── Шкала (гучність) і смужка-індикатор (заряд, навантаження): тонка доріжка 4 px */
+scale trough {{ min-height: 4px; min-width: 4px; border-radius: 2px; border: none; background-color: @line; }}
+scale highlight {{ border-radius: 2px; border: none; background-color: @accent; }}
+scale slider {{ min-width: 12px; min-height: 12px; margin: -4px; border-radius: 6px; border: none; box-shadow: none; background-color: @text; }}
+levelbar trough {{ min-height: 4px; padding: 0; border: none; background: none; }}
+levelbar block {{ min-height: 4px; border: none; border-radius: 2px; }}
+levelbar block.filled {{ background-color: @accent; }}
+levelbar block.empty  {{ background-color: @line; }}
+
+/* ── Поле вводу */
+entry.ui-entry {{
+    background: @surface; color: @text; border: 1px solid @accent; border-radius: {rc}px; box-shadow: none;
+    padding: 2px 8px; min-height: 0; font-size: {ty['body']}pt;
+}}
+"""
+
+
+def generate(t):
+    c, f, term = t["colors"], t["fonts"], t["terminal"]
+    s = {**SHAPE_DEFAULT, **t["shape"]}
+    ty = {**TYPE_DEFAULT, **t.get("type", {})}
+    os.makedirs(GEN, exist_ok=True)
+    w = max(map(len, c))
+
+    # ── GTK CSS: кольори + шрифт для всього
+    css = [f"/* {HEAD} */"]
+    css += [f"@define-color {k:<{w}} {v};" for k, v in c.items()]
+    css += ["", f'* {{ font-family: "{f["ui"]}", "{f["icons"]}", sans-serif; }}',
+            f'.mono {{ font-family: "{f["mono"]}"; }}   /* цифри однакової ширини */', ""]
+    write("theme.css", "\n".join(css) + ui_kit(c, f, ty, s))
+
+    # ── GTK4 (сповіщення, плашка гучності): те саме + кольори числами «r, g, b» для rgba(var(--rgb-…), α)
+    rgb3 = [f"  --rgb-{k}: {', '.join(str(int(v[i:i + 2], 16)) for i in (1, 3, 5))};" for k, v in c.items()]
+    write("theme4.css", "\n".join([f'/* {HEAD} */', '@import url("theme.css");', ":root {", *rgb3, "}", ""]))
+
+    # ── rofi
+    rasi = [f"/* {HEAD} */", "* {"]
+    rasi += [f"    {k + ':':<{w + 1}} {v};" for k, v in c.items()]
+    rasi += [f'    font:{"":<{w - 4}} "{f["ui"]} {f["size"]}";',
+             f'    font-mono:{"":<{w - 9}} "{f["mono"]} {f["size"]}";',
+             f'    font-small:{"":<{w - 10}} "{f["ui"]} {int(f["size"]) - 1}";',
+             f"    radius:{'':<{w - 6}} {s['radius']}px;",
+             f"    radius-control: {s['radius-control']}px;",
+             f'    font-title:     "{f["ui"]} Bold {ty["title"]}";',
+             f'    font-subtitle:  "{f["ui"]} SemiBold {ty["subtitle"]}";',
+             f'    font-body:      "{f["ui"]} {ty["body"]}";',
+             f'    font-caption:   "{f["ui"]} {ty["caption"]}";',
+             f'    font-icon:      "{f["icons"]} {ty["icon"]}";',
+             f"    accent-bold:{'':<{w - 11}} bold {c['accent']};   /* для highlight: rofi не приймає там @змінну + слово */",
+             "}", ""]
+    write("theme.rasi", "\n".join(rasi))
+
+    # ── Hyprland (Lua)
+    lua = [f"-- {HEAD}", "C = {"]
+    lua += [f'    {ident(k):<{w}} = "rgb({v[1:]})",' for k, v in c.items()]
+    lua += ["}", "THEME = {"]
+    lua += [f'    {ident(k):<12} = {v},' for k, v in s.items()]
+    lua += [f'    font_{ident(k):<7} = "{v}",' for k, v in f.items()]
+    lua += ["}", ""]
+    write("theme.lua", "\n".join(lua))
+
+    # ── C
+    h = [f"/* {HEAD} */", "#pragma once", "/* Кольори: TH_<НАЗВА> — рядок «#rrggbb», TH_<НАЗВА>_RGB — три числа 0…1 (r, g, b) */"]
+    for k, v in c.items():
+        n = ident(k).upper()
+        h.append(f'#define TH_{n:<12} "{v}"')
+        h.append(f"#define TH_{n + '_RGB':<12} {', '.join(f'{x:.4f}' for x in rgb(v))}")
+    for k, v in f.items():
+        h.append(f'#define TH_FONT_{ident(k).upper():<7} "{v}"')
+    for k, v in s.items():
+        h.append(f"#define TH_{ident(k).upper():<12} {v}")
+    for k, v in ty.items():
+        h.append(f"#define TH_TYPE_{ident(k).upper():<8} {v}")
+    write("theme.h", "\n".join(h) + "\n")
+
+    # ── Python
+    py = [f"# {HEAD}", "import os", "",
+          "# Підключення теми в CSS програм на GTK3 (додати на початок їхнього CSS)",
+          'CSS_IMPORT = f\'@import url("file://{os.path.dirname(os.path.abspath(__file__))}/theme.css");\'',
+          "", "C = {"]
+    py += [f'    "{k}": "{v}",' for k, v in c.items()]
+    py += ["}", "FONT = {"]
+    py += [f'    "{k}": "{v}",' for k, v in f.items()]
+    py += ["}", "TYPE = {"]
+    py += [f'    "{k}": {v},' for k, v in ty.items()]
+    py += ["}", "SHAPE = {"]
+    py += [f'    "{k}": {v},' for k, v in s.items()]
+    py += ["}", "",
+           "def rgb(name):", '    """Колір як (r, g, b) у 0…1 — для cairo."""',
+           "    h = C[name]", "    return tuple(int(h[i:i + 2], 16) / 255 for i in (1, 3, 5))", ""]
+    write("theme.py", "\n".join(py))
+
+    # ── kitty: ролі + 16 кольорів терміналу
+    kit = [f"# {HEAD}",
+           f"font_family             {f['ui']}",
+           f"bold_font               {f['icons']} Bold",
+           f"italic_font             {f['icons']} Italic",
+           f"bold_italic_font        {f['icons']} Bold Italic",
+           f"foreground              {c['text']}", f"background              {c['bg']}",
+           "selection_foreground    none", f"selection_background    {c['line']}",
+           f"url_color               {c['accent']}", f"cursor                  {c['accent']}",
+           f"cursor_text_color       {c['bg']}",
+           f"active_border_color     {c['accent']}", f"inactive_border_color   {c['line']}",
+           f"active_tab_foreground   {c['bg']}", f"active_tab_background   {c['accent']}",
+           f"inactive_tab_foreground {c['muted']}", f"inactive_tab_background {c['surface']}",
+           f"tab_bar_background      {c['bg']}"]
+    for i, name in enumerate(["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"]):
+        normal, bright = term[name].split()
+        kit += [f"color{i:<2}  {normal}", f"color{i + 8:<2}  {bright}"]
+    write("kitty.conf", "\n".join(kit) + "\n")
+
+    # ── shell (zsh, скрипти waybar): TH_<НАЗВА>="#rrggbb"
+    write("theme.sh", "\n".join([f"# {HEAD}"] + [f'TH_{ident(k).upper()}="{v}"' for k, v in c.items()]) + "\n")
+
+    # ── шаблони (templates/*): {назва} → колір «#rrggbb», {назва:hex} → «rrggbb» без решітки
+    #    (для форматів, де # — початок коментаря, напр. hyprlock: rgb({bg:hex}))
+    vals = {**t.get("fonts", {}), **s, **{"type-" + k: v for k, v in ty.items()}, **c}   # у шаблонах доступні й шрифти та форма: {mono}, {radius}
+    def fill(m):
+        v = vals.get(m.group(1))
+        if v is None:
+            return m.group(0)
+        return v.lstrip("#") if m.group(2) else v
+    for name in sorted(os.listdir(os.path.join(DIR, "templates"))):
+        text = open(os.path.join(DIR, "templates", name), encoding="utf-8").read()
+        write(name, re.sub(r"\{([a-z0-9-]+)(:hex)?\}", fill, text))
+
+    # ── satty (редактор знімків): шрифт інструмента «Текст» і палітра пензлів
+    pal = ", ".join(f'"{c[k]}"' for k in ("accent", "accent2", "red", "yellow", "green", "text"))
+    write("satty.toml", "\n".join([
+        f"# {HEAD}",
+        "# SATTY — редактор знімків (відкриває hypr/snip.py). Ctrl+S зберегти · Ctrl+C копіювати ·",
+        "# Ctrl+Z / Ctrl+Y відмінити / повторити · Esc закрити. Шлях і буфер обміну задає snip.py.",
+        "", "[font]", f'family = "{f["ui"]}"   # шрифт інструмента «Текст»', 'style = "Bold"',
+        "", "[color-palette]", "# акцент, другий акцент, червоний, жовтий, зелений, текст",
+        f"palette = [{pal}]", ""]))
+
+
+def run(*cmd):
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def apply_meta(meta):
+    """[meta]: світлі / темні вікна програм (GTK, Firefox, libadwaita)."""
+    gtk = meta.get("gtk", "default")
+    scheme, gtk_theme = {"dark": ("prefer-dark", "Adwaita-dark"),
+                         "light": ("prefer-light", "Adwaita")}.get(gtk, ("default", "Adwaita"))
+    run("gsettings", "set", "org.gnome.desktop.interface", "color-scheme", scheme)
+    run("gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", gtk_theme)
+    # Шпалери теми ставить перемикач ~/.config/theme/theme (він пам'ятає, які шпалери були в кожної теми)
+
+
+def reload():
+    home = os.path.expanduser("~")
+    hypr = os.path.join(home, ".config/hypr")
+    run(os.path.join(hypr, "src/build.sh"))                         # C: еквалайзер, віджети, плагін меню
+    for prog in ("waybar", "waybar-music", "waybar-comms"):
+        run("pkill", "-USR2", "-x", prog)                           # waybar: перечитати стиль
+    run("swaync-client", "--reload-css")
+    # Telegram (nchat) переписує свої файли при виході — колір кладемо лише коли він закритий;
+    # інакше його покладе comms-run.sh перед наступним запуском
+    if subprocess.run(["pgrep", "-x", "nchat"], stdout=subprocess.DEVNULL).returncode != 0:
+        run("cp", os.path.join(GEN, "nchat-color.conf"), os.path.join(home, ".config/nchat/color.conf"))
+    run("pkill", "-x", "swayosd-server")                            # перезапуститься нижче (services.sh)
+    run("pkill", "-USR1", "-x", "kitty")                            # kitty: перечитати налаштування
+    run("pkill", "-x", "desk")
+    run("pkill", "-x", "visualizer")
+    run("pkill", "-x", "stars")                                     # зірки: колір — з теми
+    run("hyprctl", "reload")                                        # Hyprland: кольори рамок, заокруглення
+    run("sh", os.path.join(hypr, "services.sh"))                    # запустити все, що зупинили
+
+
+if __name__ == "__main__":
+    theme = parse(os.path.join(DIR, "theme.conf"))
+    generate(theme)
+    print(f"Тему згенеровано: {GEN}")
+    if "--gen" not in sys.argv:
+        reload()
+        apply_meta(theme.get("meta", {}))
+        print("Програми оновлено.")
